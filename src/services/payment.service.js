@@ -5,6 +5,7 @@ import { config } from '../config/config.js';
 import { AppError } from '../middlewares/error.middleware.js';
 import enrollmentService from './enrollment.service.js';
 import auditService from './audit.service.js';
+import couponService from './coupon.service.js';
 
 class PaymentService {
     constructor() {
@@ -14,8 +15,8 @@ class PaymentService {
         });
     }
 
-    // Create Razorpay order
-    async createOrder(studentId, courseId) {
+    // Create Razorpay order (with optional coupon)
+    async createOrder(studentId, courseId, couponCode = null) {
         // Get course details
         const { data: course, error } = await supabase
             .from('courses')
@@ -39,29 +40,52 @@ class PaymentService {
             throw new AppError('You are already enrolled in this course', 400);
         }
 
-        // Create Razorpay order
+        let finalAmount = course.price;
+        let discountAmount = 0;
+        let couponId = null;
+
+        // Validate and apply coupon if provided
+        if (couponCode) {
+            try {
+                const coupon = await couponService.validateCoupon(couponCode, courseId, studentId);
+                discountAmount = couponService.calculateDiscount(coupon, course.price);
+                finalAmount = course.price - discountAmount;
+                couponId = coupon.id;
+            } catch (error) {
+                // If coupon validation fails, throw the error
+                throw error;
+            }
+        }
+
+        // Create Razorpay order with final amount
         const orderOptions = {
-            amount: Math.round(course.price * 100), // Convert to paise
+            amount: Math.round(finalAmount * 100), // Convert to paise
             currency: 'INR',
             receipt: `order_${Date.now()}`,
             notes: {
                 student_id: studentId,
                 course_id: courseId,
-                course_title: course.title
+                course_title: course.title,
+                original_amount: course.price,
+                discount_amount: discountAmount,
+                coupon_code: couponCode || 'none'
             }
         };
 
         try {
             const order = await this.razorpay.orders.create(orderOptions);
 
-            // Save payment record
+            // Save payment record with coupon info
             await supabase
                 .from('payments')
                 .insert({
                     razorpay_order_id: order.id,
                     student_id: studentId,
                     course_id: courseId,
-                    amount: course.price,
+                    amount: finalAmount,
+                    original_amount: course.price,
+                    discount_amount: discountAmount,
+                    coupon_id: couponId,
                     currency: 'INR',
                     status: 'pending'
                 });
@@ -70,7 +94,10 @@ class PaymentService {
                 orderId: order.id,
                 amount: order.amount,
                 currency: order.currency,
-                keyId: config.razorpay.keyId
+                keyId: config.razorpay.keyId,
+                originalAmount: course.price,
+                discountAmount: discountAmount,
+                finalAmount: finalAmount
             };
         } catch (error) {
             console.error('Razorpay order creation error:', error);
@@ -104,7 +131,7 @@ class PaymentService {
         }
 
         // Update payment record
-        await supabase
+        const { data: updatedPayment } = await supabase
             .from('payments')
             .update({
                 razorpay_payment_id,
@@ -112,7 +139,19 @@ class PaymentService {
                 status: 'success',
                 payment_method: 'online'
             })
-            .eq('razorpay_order_id', razorpay_order_id);
+            .eq('razorpay_order_id', razorpay_order_id)
+            .select()
+            .single();
+
+        // Record coupon usage if coupon was used
+        if (payment.coupon_id && payment.discount_amount > 0) {
+            await couponService.applyCoupon(
+                payment.coupon_id,
+                payment.student_id,
+                updatedPayment.id,
+                payment.discount_amount
+            );
+        }
 
         // Enroll student
         const enrollment = await enrollmentService.enrollStudent(
@@ -126,7 +165,13 @@ class PaymentService {
             payment.student_id,
             'PAYMENT_SUCCESS',
             `Payment successful for course: ${payment.course_id}`,
-            { orderId: razorpay_order_id, paymentId: razorpay_payment_id, amount: payment.amount }
+            {
+                orderId: razorpay_order_id,
+                paymentId: razorpay_payment_id,
+                amount: payment.amount,
+                discount: payment.discount_amount || 0,
+                coupon_used: payment.coupon_id ? true : false
+            }
         );
 
         return {

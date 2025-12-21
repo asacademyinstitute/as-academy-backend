@@ -20,6 +20,7 @@ import auditRoutes from './src/routes/audit.routes.js';
 import aiRoutes from './src/routes/ai.routes.js';
 import deviceRoutes from './src/routes/device.routes.js';
 import courseRequestRoutes from './src/routes/courseRequest.routes.js';
+import couponRoutes from './src/routes/coupon.routes.js';
 
 const app = express();
 
@@ -97,6 +98,7 @@ app.use('/api/audit', auditRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/devices', deviceRoutes);
 app.use('/api/course-requests', courseRequestRoutes);
+app.use('/api/coupons', couponRoutes);
 
 // 404 handler
 app.use('*', (req, res) => {

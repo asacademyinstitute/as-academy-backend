@@ -9,9 +9,9 @@ const router = Router();
 
 // Create Razorpay order (student)
 router.post('/create-order', authenticate, isStudent, asyncHandler(async (req, res) => {
-    const { courseId } = req.body;
+    const { courseId, couponCode } = req.body;
 
-    const order = await paymentService.createOrder(req.user.id, courseId);
+    const order = await paymentService.createOrder(req.user.id, courseId, couponCode);
 
     res.json({
         success: true,
