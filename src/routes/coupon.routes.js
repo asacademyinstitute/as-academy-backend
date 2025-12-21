@@ -3,6 +3,7 @@ import couponService from '../services/coupon.service.js';
 import { asyncHandler } from '../middlewares/error.middleware.js';
 import { authenticate } from '../middlewares/auth.middleware.js';
 import { isAdmin } from '../middlewares/rbac.middleware.js';
+import supabase from '../config/database.js';
 
 const router = Router();
 
@@ -89,7 +90,7 @@ router.post('/validate', authenticate, asyncHandler(async (req, res) => {
     const coupon = await couponService.validateCoupon(code, courseId, req.user.id);
 
     // Get course price to calculate discount
-    const { data: course } = await req.app.locals.supabase
+    const { data: course } = await supabase
         .from('courses')
         .select('price')
         .eq('id', courseId)
