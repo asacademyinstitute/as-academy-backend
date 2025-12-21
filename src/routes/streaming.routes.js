@@ -84,6 +84,16 @@ router.get('/watermark', authenticate, isStudent, asyncHandler(async (req, res) 
     });
 }));
 
+// Get download URL for admin (no enrollment check)
+router.get('/admin/download/:lectureId', authenticate, isTeacherOrAdmin, asyncHandler(async (req, res) => {
+    const result = await streamingService.getAdminDownloadUrl(req.params.lectureId);
+
+    res.json({
+        success: true,
+        data: result
+    });
+}));
+
 // Delete file (admin only)
 router.delete('/file', authenticate, isTeacherOrAdmin, asyncHandler(async (req, res) => {
     const { fileKey } = req.body;

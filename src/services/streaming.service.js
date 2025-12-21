@@ -254,6 +254,29 @@ class StreamingService {
             userId: user.id
         };
     }
+
+    // Get download URL for admin (no enrollment check)
+    async getAdminDownloadUrl(lectureId) {
+        // Get lecture details
+        const lecture = await lectureService.getLectureById(lectureId);
+
+        if (!lecture.file_url) {
+            throw new AppError('No file available for this lecture', 404);
+        }
+
+        // Generate signed URL with longer expiry for downloads (1 hour)
+        const signedUrl = await this.getSignedUrl(lecture.file_url, 3600);
+
+        return {
+            url: signedUrl,
+            lecture: {
+                id: lecture.id,
+                title: lecture.title,
+                type: lecture.type
+            },
+            expiresIn: 3600
+        };
+    }
 }
 
 export default new StreamingService();
