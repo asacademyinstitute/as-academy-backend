@@ -245,6 +245,57 @@ class LectureService {
             }
         }
     }
+
+    // Transfer lectures to another chapter
+    async transferLectures(lectureIds, targetChapterId, adminId) {
+        // Verify target chapter exists
+        const { data: targetChapter, error: chapterError } = await supabase
+            .from('chapters')
+            .select('id, title, course_id')
+            .eq('id', targetChapterId)
+            .single();
+
+        if (chapterError || !targetChapter) {
+            throw new AppError('Target chapter not found', 404);
+        }
+
+        // Get max lecture_order in target chapter
+        const { data: existingLectures } = await supabase
+            .from('lectures')
+            .select('lecture_order')
+            .eq('chapter_id', targetChapterId)
+            .order('lecture_order', { ascending: false })
+            .limit(1);
+
+        let nextOrder = existingLectures && existingLectures.length > 0
+            ? existingLectures[0].lecture_order + 1
+            : 1;
+
+        // Transfer each lecture
+        const transferred = [];
+        for (const lectureId of lectureIds) {
+            const { data: lecture, error } = await supabase
+                .from('lectures')
+                .update({
+                    chapter_id: targetChapterId,
+                    lecture_order: nextOrder++
+                })
+                .eq('id', lectureId)
+                .select()
+                .single();
+
+            if (!error && lecture) {
+                transferred.push(lecture);
+            }
+        }
+
+        return {
+            success: true,
+            message: `${transferred.length} lecture(s) transferred successfully`,
+            transferred_count: transferred.length,
+            target_chapter: targetChapter
+        };
+    }
 }
 
 export default new LectureService();

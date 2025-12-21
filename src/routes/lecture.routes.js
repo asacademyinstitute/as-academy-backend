@@ -92,4 +92,31 @@ router.post('/:id/progress', authenticate, isStudent, asyncHandler(async (req, r
     });
 }));
 
+// Transfer lectures to another chapter (admin only)
+router.post('/transfer', authenticate, isTeacherOrAdmin, asyncHandler(async (req, res) => {
+    const { lecture_ids, target_chapter_id } = req.body;
+
+    if (!lecture_ids || !Array.isArray(lecture_ids) || lecture_ids.length === 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'Please provide lecture_ids as a non-empty array'
+        });
+    }
+
+    if (!target_chapter_id) {
+        return res.status(400).json({
+            success: false,
+            message: 'Please provide target_chapter_id'
+        });
+    }
+
+    const result = await lectureService.transferLectures(lecture_ids, target_chapter_id, req.user.id);
+
+    res.json({
+        success: true,
+        message: result.message,
+        data: result
+    });
+}));
+
 export default router;
