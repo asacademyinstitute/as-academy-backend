@@ -29,9 +29,30 @@ app.set('trust proxy', 1);
 // Security middleware
 app.use(helmet());
 
-// CORS configuration
+// CORS configuration - Allow Vercel preview deployments
 app.use(cors({
-    origin: config.frontendUrl,
+    origin: (origin, callback) => {
+        // Allow requests with no origin (like mobile apps, Postman, etc.)
+        if (!origin) return callback(null, true);
+
+        // Allow configured frontend URL
+        if (origin === config.frontendUrl) {
+            return callback(null, true);
+        }
+
+        // Allow all Vercel preview deployments (*.vercel.app)
+        if (origin.match(/^https:\/\/.*\.vercel\.app$/)) {
+            return callback(null, true);
+        }
+
+        // Allow localhost for development
+        if (origin.match(/^http:\/\/localhost:\d+$/)) {
+            return callback(null, true);
+        }
+
+        // Reject all other origins
+        callback(new Error('Not allowed by CORS'));
+    },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Device-ID']
