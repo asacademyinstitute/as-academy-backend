@@ -55,7 +55,7 @@ router.put('/:id', authenticate, isAdmin, asyncHandler(async (req, res) => {
     });
 }));
 
-// Toggle coupon status (admin only)
+// Toggle coupon status (admin only) - MUST be before /:id routes
 router.patch('/:id/toggle', authenticate, isAdmin, asyncHandler(async (req, res) => {
     const coupon = await couponService.toggleCoupon(req.params.id);
 
@@ -63,6 +63,26 @@ router.patch('/:id/toggle', authenticate, isAdmin, asyncHandler(async (req, res)
         success: true,
         data: coupon,
         message: `Coupon ${coupon.is_active ? 'enabled' : 'disabled'} successfully`,
+    });
+}));
+
+// Get usage statistics (admin only) - MUST be before /:id routes
+router.get('/:id/stats', authenticate, isAdmin, asyncHandler(async (req, res) => {
+    const stats = await couponService.getUsageStats(req.params.id);
+
+    res.json({
+        success: true,
+        data: stats,
+    });
+}));
+
+// Get single coupon (admin only)
+router.get('/:id', authenticate, isAdmin, asyncHandler(async (req, res) => {
+    const coupon = await couponService.getCouponById(req.params.id);
+
+    res.json({
+        success: true,
+        data: coupon,
     });
 }));
 
@@ -111,16 +131,6 @@ router.post('/validate', authenticate, asyncHandler(async (req, res) => {
             final_amount: finalAmount,
         },
         message: 'Coupon applied successfully',
-    });
-}));
-
-// Get usage statistics (admin only)
-router.get('/:id/stats', authenticate, isAdmin, asyncHandler(async (req, res) => {
-    const stats = await couponService.getUsageStats(req.params.id);
-
-    res.json({
-        success: true,
-        data: stats,
     });
 }));
 
