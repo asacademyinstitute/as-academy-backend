@@ -1,6 +1,7 @@
 import express from 'express';
 import topRankerService from '../services/topRanker.service.js';
-import { authenticate, isAdmin } from '../middlewares/auth.middleware.js';
+import { authenticate } from '../middlewares/auth.middleware.js';
+import { isAdmin } from '../middlewares/rbac.middleware.js';
 import { asyncHandler } from '../middlewares/error.middleware.js';
 
 const router = express.Router();
