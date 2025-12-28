@@ -96,8 +96,23 @@ class LectureService {
         return lecture;
     }
 
-    // Delete lecture
+    // Delete lecture (with B2 file deletion)
     async deleteLecture(lectureId) {
+        // Get lecture to find file_url
+        const { data: lecture } = await supabase
+            .from('lectures')
+            .select('file_url')
+            .eq('id', lectureId)
+            .single();
+
+        // Delete file from B2 storage if exists
+        if (lecture && lecture.file_url) {
+            console.log('🗑️ Deleting lecture file from B2:', lecture.file_url);
+            const streamingService = (await import('./streaming.service.js')).default;
+            await streamingService.deleteFile(lecture.file_url);
+        }
+
+        // Delete lecture from database
         const { error } = await supabase
             .from('lectures')
             .delete()
@@ -107,7 +122,7 @@ class LectureService {
             throw new AppError('Failed to delete lecture', 500);
         }
 
-        return { success: true, message: 'Lecture deleted successfully' };
+        return { success: true, message: 'Lecture and file deleted successfully from database and B2 storage' };
     }
 
     // Reorder lectures
