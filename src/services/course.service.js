@@ -172,7 +172,7 @@ class CourseService {
         return course;
     }
 
-    // Delete course (with cascade delete of chapters, lectures, enrollments)
+    // Delete course (with cascade delete of chapters, lectures, enrollments, and B2 files)
     async deleteCourse(courseId, userId) {
         try {
             // Step 1: Delete all enrollments for this course
@@ -191,9 +191,29 @@ class CourseService {
                 .select('id')
                 .eq('course_id', courseId);
 
-            // Step 3: Delete all lectures in these chapters
+            // Step 3: Get all lectures and delete their files from B2
             if (chapters && chapters.length > 0) {
                 const chapterIds = chapters.map(ch => ch.id);
+
+                // Get all lectures with file_url
+                const { data: lectures } = await supabase
+                    .from('lectures')
+                    .select('id, file_url')
+                    .in('chapter_id', chapterIds);
+
+                // Delete files from B2 storage
+                if (lectures && lectures.length > 0) {
+                    console.log(`🗑️ Deleting ${lectures.length} lecture files from B2 storage...`);
+                    const streamingService = (await import('./streaming.service.js')).default;
+
+                    for (const lecture of lectures) {
+                        if (lecture.file_url) {
+                            await streamingService.deleteFile(lecture.file_url);
+                        }
+                    }
+                }
+
+                // Delete lectures from database
                 const { error: lectureError } = await supabase
                     .from('lectures')
                     .delete()
@@ -229,10 +249,10 @@ class CourseService {
             await auditService.log(
                 userId,
                 'COURSE_DELETED',
-                `Deleted course with ID: ${courseId} (including all chapters, lectures, and enrollments)`
+                `Deleted course with ID: ${courseId} (including all chapters, lectures, enrollments, and B2 files)`
             );
 
-            return { success: true, message: 'Course and all related data deleted successfully' };
+            return { success: true, message: 'Course and all related data (including B2 files) deleted successfully' };
         } catch (error) {
             console.error('Delete course error:', error);
             throw error;

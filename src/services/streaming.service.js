@@ -94,6 +94,36 @@ class StreamingService {
         }
     }
 
+    // Delete file from Backblaze B2
+    async deleteFile(fileKey) {
+        if (!fileKey) {
+            console.log('⚠️ No file key provided for deletion');
+            return { success: false, message: 'No file key provided' };
+        }
+
+        console.log('🗑️ Deleting file from B2:', fileKey);
+
+        const params = {
+            Bucket: config.backblaze.bucketName,
+            Key: fileKey
+        };
+
+        try {
+            await this.s3.deleteObject(params).promise();
+            console.log('✅ File deleted successfully from B2:', fileKey);
+            return { success: true, message: 'File deleted from B2 storage' };
+        } catch (error) {
+            console.error('❌ File deletion error:', {
+                message: error.message,
+                code: error.code,
+                fileKey
+            });
+
+            // Don't throw error - just log it (file might already be deleted)
+            return { success: false, message: error.message };
+        }
+    }
+
     // Generate signed URL for video/PDF access
     async getSignedUrl(fileKey, expirySeconds = null) {
         const expiry = expirySeconds || config.cloudfront.signedUrlExpiry;
