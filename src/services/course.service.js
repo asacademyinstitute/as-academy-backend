@@ -172,32 +172,71 @@ class CourseService {
         return course;
     }
 
-    // Delete course
+    // Delete course (with cascade delete of chapters, lectures, enrollments)
     async deleteCourse(courseId, userId) {
-        const { error } = await supabase
-            .from('courses')
-            .delete()
-            .eq('id', courseId);
+        try {
+            // Step 1: Delete all enrollments for this course
+            const { error: enrollmentError } = await supabase
+                .from('enrollments')
+                .delete()
+                .eq('course_id', courseId);
 
-        if (error) {
-            console.error('Delete course error:', error);
-
-            // Check if it's a foreign key constraint error
-            if (error.code === '23503' || error.message?.includes('foreign key')) {
-                throw new AppError('Cannot delete course. It has chapters, lectures, or enrollments. Please remove them first.', 400);
+            if (enrollmentError) {
+                console.error('Error deleting enrollments:', enrollmentError);
             }
 
-            throw new AppError(`Failed to delete course: ${error.message}`, 500);
+            // Step 2: Get all chapters for this course
+            const { data: chapters } = await supabase
+                .from('chapters')
+                .select('id')
+                .eq('course_id', courseId);
+
+            // Step 3: Delete all lectures in these chapters
+            if (chapters && chapters.length > 0) {
+                const chapterIds = chapters.map(ch => ch.id);
+                const { error: lectureError } = await supabase
+                    .from('lectures')
+                    .delete()
+                    .in('chapter_id', chapterIds);
+
+                if (lectureError) {
+                    console.error('Error deleting lectures:', lectureError);
+                }
+            }
+
+            // Step 4: Delete all chapters
+            const { error: chapterError } = await supabase
+                .from('chapters')
+                .delete()
+                .eq('course_id', courseId);
+
+            if (chapterError) {
+                console.error('Error deleting chapters:', chapterError);
+            }
+
+            // Step 5: Finally delete the course
+            const { error: courseError } = await supabase
+                .from('courses')
+                .delete()
+                .eq('id', courseId);
+
+            if (courseError) {
+                console.error('Delete course error:', courseError);
+                throw new AppError(`Failed to delete course: ${courseError.message}`, 500);
+            }
+
+            // Log action
+            await auditService.log(
+                userId,
+                'COURSE_DELETED',
+                `Deleted course with ID: ${courseId} (including all chapters, lectures, and enrollments)`
+            );
+
+            return { success: true, message: 'Course and all related data deleted successfully' };
+        } catch (error) {
+            console.error('Delete course error:', error);
+            throw error;
         }
-
-        // Log action
-        await auditService.log(
-            userId,
-            'COURSE_DELETED',
-            `Deleted course with ID: ${courseId}`
-        );
-
-        return { success: true, message: 'Course deleted successfully' };
     }
 
     // Get course statistics
