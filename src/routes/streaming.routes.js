@@ -94,6 +94,25 @@ router.get('/admin/download/:lectureId', authenticate, isTeacherOrAdmin, asyncHa
     });
 }));
 
+// Get signed URL for any file (admin only)
+router.post('/signed-url', authenticate, isTeacherOrAdmin, asyncHandler(async (req, res) => {
+    const { fileKey } = req.body;
+
+    if (!fileKey) {
+        return res.status(400).json({
+            success: false,
+            message: 'File key is required'
+        });
+    }
+
+    const url = await streamingService.getSignedUrl(fileKey);
+
+    res.json({
+        success: true,
+        url
+    });
+}));
+
 // Delete file (admin only)
 router.delete('/file', authenticate, isTeacherOrAdmin, asyncHandler(async (req, res) => {
     const { fileKey } = req.body;
