@@ -246,7 +246,7 @@ class LectureService {
         }
     }
 
-    // Transfer lectures to another chapter
+    // Transfer lectures to another chapter (COPY, not move)
     async transferLectures(lectureIds, targetChapterId, adminId) {
         // Verify target chapter exists
         const { data: targetChapter, error: chapterError } = await supabase
@@ -271,28 +271,43 @@ class LectureService {
             ? existingLectures[0].lecture_order + 1
             : 1;
 
-        // Transfer each lecture
-        const transferred = [];
+        // Copy each lecture (create duplicate in target chapter)
+        const copied = [];
         for (const lectureId of lectureIds) {
-            const { data: lecture, error } = await supabase
+            // Get original lecture
+            const { data: originalLecture, error: fetchError } = await supabase
                 .from('lectures')
-                .update({
+                .select('*')
+                .eq('id', lectureId)
+                .single();
+
+            if (fetchError || !originalLecture) {
+                continue; // Skip if lecture not found
+            }
+
+            // Create copy in target chapter
+            const { data: newLecture, error: createError } = await supabase
+                .from('lectures')
+                .insert({
                     chapter_id: targetChapterId,
+                    title: originalLecture.title,
+                    type: originalLecture.type,
+                    file_url: originalLecture.file_url,
+                    duration: originalLecture.duration,
                     lecture_order: nextOrder++
                 })
-                .eq('id', lectureId)
                 .select()
                 .single();
 
-            if (!error && lecture) {
-                transferred.push(lecture);
+            if (!createError && newLecture) {
+                copied.push(newLecture);
             }
         }
 
         return {
             success: true,
-            message: `${transferred.length} lecture(s) transferred successfully`,
-            transferred_count: transferred.length,
+            message: `${copied.length} lecture(s) copied successfully`,
+            copied_count: copied.length,
             target_chapter: targetChapter
         };
     }
