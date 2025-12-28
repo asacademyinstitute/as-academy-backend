@@ -180,7 +180,14 @@ class CourseService {
             .eq('id', courseId);
 
         if (error) {
-            throw new AppError('Failed to delete course', 500);
+            console.error('Delete course error:', error);
+
+            // Check if it's a foreign key constraint error
+            if (error.code === '23503' || error.message?.includes('foreign key')) {
+                throw new AppError('Cannot delete course. It has chapters, lectures, or enrollments. Please remove them first.', 400);
+            }
+
+            throw new AppError(`Failed to delete course: ${error.message}`, 500);
         }
 
         // Log action
