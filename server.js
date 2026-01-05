@@ -48,6 +48,11 @@ app.use(cors({
             return callback(null, true);
         }
 
+        // Allow new domain asacademy.site (with and without www)
+        if (origin === 'https://asacademy.site' || origin === 'https://www.asacademy.site') {
+            return callback(null, true);
+        }
+
         // Allow localhost for development
         if (origin.match(/^http:\/\/localhost:\d+$/)) {
             return callback(null, true);
