@@ -154,6 +154,68 @@ class TopRankerService {
 
         return updated;
     }
+
+    // Get homepage visibility setting
+    async getVisibilitySetting() {
+        const { data, error } = await supabase
+            .from('system_settings')
+            .select('setting_value')
+            .eq('setting_key', 'show_rankers_on_homepage')
+            .single();
+
+        if (error || !data) {
+            return false; // Default to hidden
+        }
+
+        return data.setting_value === 'true';
+    }
+
+    // Set homepage visibility setting (admin only)
+    async setVisibilitySetting(enabled, adminId) {
+        const value = enabled ? 'true' : 'false';
+
+        // First try to update, if no rows affected, insert
+        const { data: existing } = await supabase
+            .from('system_settings')
+            .select('id')
+            .eq('setting_key', 'show_rankers_on_homepage')
+            .single();
+
+        if (existing) {
+            const { error } = await supabase
+                .from('system_settings')
+                .update({
+                    setting_value: value,
+                    updated_by: adminId,
+                    updated_at: new Date().toISOString()
+                })
+                .eq('setting_key', 'show_rankers_on_homepage');
+
+            if (error) {
+                throw new AppError('Failed to update visibility setting', 500);
+            }
+        } else {
+            const { error } = await supabase
+                .from('system_settings')
+                .insert({
+                    setting_key: 'show_rankers_on_homepage',
+                    setting_value: value,
+                    description: 'Controls whether the Top Rankers section is displayed on the homepage',
+                    updated_by: adminId
+                });
+
+            if (error) {
+                throw new AppError('Failed to create visibility setting', 500);
+            }
+        }
+
+        return {
+            success: true,
+            message: `Top Rankers ${enabled ? 'will be shown' : 'will be hidden'} on homepage`,
+            enabled
+        };
+    }
+
 }
 
 export default new TopRankerService();

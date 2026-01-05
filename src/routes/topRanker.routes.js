@@ -15,6 +15,30 @@ router.get('/', asyncHandler(async (req, res) => {
     });
 }));
 
+// Public route - Get visibility setting
+router.get('/visibility', asyncHandler(async (req, res) => {
+    const enabled = await topRankerService.getVisibilitySetting();
+    res.json({
+        success: true,
+        data: { enabled }
+    });
+}));
+
+// Admin route - Set visibility setting
+router.post('/visibility', authenticate, isAdmin, asyncHandler(async (req, res) => {
+    const { enabled } = req.body;
+
+    if (typeof enabled !== 'boolean') {
+        return res.status(400).json({
+            success: false,
+            message: 'enabled must be a boolean value'
+        });
+    }
+
+    const result = await topRankerService.setVisibilitySetting(enabled, req.user.id);
+    res.json(result);
+}));
+
 // Admin routes - Get all top rankers
 router.get('/admin', authenticate, isAdmin, asyncHandler(async (req, res) => {
     const rankers = await topRankerService.getAllTopRankers();
