@@ -9,7 +9,7 @@ const router = Router();
 router.get('/video/:lectureId', authenticate, asyncHandler(async (req, res) => {
     const result = await streamingService.generateVideoStreamUrl(
         req.params.lectureId,
-        req.user.userId
+        req.user.id
     );
 
     res.json({
@@ -22,7 +22,7 @@ router.get('/video/:lectureId', authenticate, asyncHandler(async (req, res) => {
 router.get('/pdf/:lectureId', authenticate, asyncHandler(async (req, res) => {
     const result = await streamingService.generatePDFStreamUrl(
         req.params.lectureId,
-        req.user.userId
+        req.user.id
     );
 
     res.json({
