@@ -1,15 +1,15 @@
 import { v4 as uuidv4 } from 'uuid';
 import crypto from 'crypto';
 
-// Generate a device fingerprint from request
+// Generate a device fingerprint from request (excluding dynamic IP address to prevent lockouts on network shifts)
 export const generateDeviceId = (req) => {
     const userAgent = req.headers['user-agent'] || '';
-    const ip = req.ip || req.connection.remoteAddress || '';
+    const deviceIdHeader = req.headers['x-device-id'] || '';
 
-    // Create a hash from user agent and IP
+    // Create a stable hash from user agent and persistent header
     const hash = crypto
         .createHash('sha256')
-        .update(userAgent + ip)
+        .update(userAgent + deviceIdHeader)
         .digest('hex');
 
     return hash;

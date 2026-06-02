@@ -4,12 +4,9 @@ import { AppError } from '../middlewares/error.middleware.js';
 
 class BackblazeService {
     constructor() {
-        this.b2 = new B2({
-            applicationKeyId: process.env.B2_KEY_ID,
-            applicationKey: process.env.B2_APPLICATION_KEY,
-        });
-        this.bucketId = process.env.B2_BUCKET_ID;
-        this.bucketName = process.env.B2_BUCKET_NAME;
+        this.b2 = null;
+        this.bucketId = null;
+        this.bucketName = null;
         this.authToken = null;
         this.uploadUrl = null;
         this.downloadUrl = null;
@@ -20,9 +17,52 @@ class BackblazeService {
      */
     async authorize() {
         try {
+            // Lazy-load bucket info and B2 instance to avoid timing/import order issues with dotenv
+            if (!this.bucketName) {
+                this.bucketName = process.env.B2_BUCKET_NAME;
+            }
+            if (!this.bucketId) {
+                this.bucketId = process.env.B2_BUCKET_ID;
+            }
+
+            if (!this.b2) {
+                const keyId = process.env.B2_KEY_ID || process.env.B2_APPLICATION_KEY_ID;
+                const appKey = process.env.B2_APPLICATION_KEY;
+                
+                console.log(`🔌 Initializing Backblaze B2 client lazily with keyId: ${keyId}`);
+                
+                this.b2 = new B2({
+                    applicationKeyId: keyId,
+                    applicationKey: appKey,
+                });
+            }
+
             const response = await this.b2.authorize();
             this.authToken = response.data.authorizationToken;
             this.downloadUrl = response.data.downloadUrl;
+
+            // Resolve bucketId dynamically
+            if (!this.bucketId) {
+                if (response.data.allowed && response.data.allowed.bucketId) {
+                    this.bucketId = response.data.allowed.bucketId;
+                    console.log('🎯 Resolved B2 Bucket ID from allowed scope:', this.bucketId);
+                } else if (this.bucketName) {
+                    try {
+                        console.log('🔍 B2_BUCKET_ID not provided. Resolving dynamically from bucketName:', this.bucketName);
+                        const bucketsRes = await this.b2.listBuckets();
+                        const bucket = bucketsRes.data.buckets.find(b => b.bucketName === this.bucketName);
+                        if (bucket) {
+                            this.bucketId = bucket.bucketId;
+                            console.log('🎯 Successfully resolved B2 Bucket ID by name:', this.bucketId);
+                        } else {
+                            console.error(`❌ Bucket '${this.bucketName}' not found in B2 buckets list`);
+                        }
+                    } catch (listErr) {
+                        console.error('⚠️ Failed to list buckets (application key may be scoped to a single bucket):', listErr.message);
+                    }
+                }
+            }
+
             return response.data;
         } catch (error) {
             console.error('B2 Authorization Error:', error);
@@ -125,6 +165,41 @@ class BackblazeService {
             };
         } catch (error) {
             console.error('B2 Get Signed URL Error:', error);
+            throw new AppError('Failed to generate signed URL', 500);
+        }
+    }
+
+    /**
+     * Generate signed download URL by fileName (expires in 2 hours)
+     * @param {string} fileName - B2 file name with path (e.g., 'videos/lecture_123.mp4')
+     * @param {number} validitySeconds - URL validity in seconds (default: 7200 = 2 hours)
+     */
+    async getSignedUrlByFileName(fileName, validitySeconds = 7200) {
+        try {
+            if (!this.authToken) {
+                await this.authorize();
+            }
+
+            const validUntil = Date.now() + (validitySeconds * 1000);
+            const bucketId = this.bucketId;
+
+            // Create download authorization for this specific filename prefix
+            const downloadAuth = await this.b2.getDownloadAuthorization({
+                bucketId: bucketId,
+                fileNamePrefix: fileName,
+                validDurationInSeconds: validitySeconds,
+            });
+
+            // Construct signed URL
+            const signedUrl = `${this.downloadUrl}/file/${this.bucketName}/${fileName}?Authorization=${downloadAuth.data.authorizationToken}`;
+
+            return {
+                url: signedUrl,
+                expiresAt: new Date(validUntil).toISOString(),
+                fileName: fileName,
+            };
+        } catch (error) {
+            console.error('B2 Get Signed URL By FileName Error:', error);
             throw new AppError('Failed to generate signed URL', 500);
         }
     }
