@@ -34,7 +34,7 @@ class PaymentService {
             const { data: existingEnrollment } = await supabase
                 .from('enrollments')
                 .select('*')
-                .eq('user_id', userId)
+                .eq('student_id', userId)
                 .eq('course_id', courseId)
                 .eq('status', 'active')
                 .single();
@@ -59,7 +59,7 @@ class PaymentService {
             const { data: payment, error: paymentError } = await supabase
                 .from('payments')
                 .insert({
-                    user_id: userId,
+                    student_id: userId,
                     course_id: courseId,
                     order_id: order.id,
                     amount: amount,
@@ -159,7 +159,7 @@ class PaymentService {
             const { data: enrollment, error: enrollError } = await supabase
                 .from('enrollments')
                 .insert({
-                    user_id: payment.user_id,
+                    student_id: payment.student_id,
                     course_id: payment.course_id,
                     payment_id: payment.id,
                     status: 'active',
@@ -260,7 +260,7 @@ class PaymentService {
                 *,
                 courses(title, thumbnail_url)
             `)
-            .eq('user_id', userId)
+            .eq('student_id', userId)
             .order('created_at', { ascending: false });
 
         if (error) {
@@ -461,7 +461,7 @@ class PaymentService {
             .from('payments')
             .select(`
                 *,
-                users:user_id (
+                users:student_id (
                     id,
                     name,
                     email
@@ -536,7 +536,7 @@ class PaymentService {
             const { data: payment, error: paymentError } = await supabase
                 .from('payments')
                 .insert({
-                    user_id: studentId,
+                    student_id: studentId,
                     course_id: courseId,
                     amount: amount,
                     status: 'success',
@@ -554,7 +554,7 @@ class PaymentService {
             const { data: enrollment, error: enrollError } = await supabase
                 .from('enrollments')
                 .insert({
-                    user_id: studentId,
+                    student_id: studentId,
                     course_id: courseId,
                     payment_id: payment.id,
                     status: 'active',
