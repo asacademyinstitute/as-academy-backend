@@ -9,7 +9,7 @@ import settingsService from './settings.service.js';
 class AuthService {
     // Register new user
     async register(userData) {
-        const { name, email, phone, password, college_name, semester, role = 'student' } = userData;
+        const { name, email, phone, password, college_name, semester, role = 'student', deviceId } = userData;
 
         // Check if user already exists
         const { data: existingUser } = await supabase
@@ -46,8 +46,8 @@ class AuthService {
             throw new AppError('Failed to create user', 500);
         }
 
-        // Generate tokens
-        const { accessToken, refreshToken } = await this.generateTokens(user.id, user.role);
+        // Generate tokens (include deviceId so device locking works from first session)
+        const { accessToken, refreshToken } = await this.generateTokens(user.id, user.role, deviceId || null);
 
         return {
             user,

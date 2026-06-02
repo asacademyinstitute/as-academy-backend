@@ -2,7 +2,6 @@ import jwt from 'jsonwebtoken';
 import { config } from '../config/config.js';
 import { AppError } from './error.middleware.js';
 import supabase from '../config/database.js';
-import { generateDeviceId } from './deviceTracking.middleware.js';
 
 export const authenticate = async (req, res, next) => {
     try {
@@ -32,17 +31,6 @@ export const authenticate = async (req, res, next) => {
         // Check if user is blocked
         if (user.status === 'blocked') {
             throw new AppError('Your account has been blocked. Please contact admin.', 403);
-        }
-
-        // For students, validate device_id from JWT matches current device
-        if (user.role === 'student' && decoded.deviceId) {
-            const currentDeviceId = generateDeviceId(req);
-            if (decoded.deviceId !== currentDeviceId) {
-                throw new AppError(
-                    'This student account is locked to one device. Contact admin to change device.',
-                    403
-                );
-            }
         }
 
         // Attach user to request
