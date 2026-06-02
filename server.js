@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
+import compression from 'compression';
 import { config } from './src/config/config.js';
 import { errorHandler } from './src/middlewares/error.middleware.js';
 
@@ -27,6 +28,9 @@ import seoRoutes from './src/routes/seo.routes.js';
 import topRankerRoutes from './src/routes/topRanker.routes.js';
 
 const app = express();
+
+// Enable Gzip Compression
+app.use(compression());
 
 // Trust proxy - required for Render deployment
 app.set('trust proxy', 1);

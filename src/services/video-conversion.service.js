@@ -42,6 +42,8 @@ class VideoConversionService {
                             '-hls_time 10',
                             '-hls_list_size 0',
                             '-f hls',
+                            '-preset ultrafast',
+                            '-threads 1'
                         ])
 
                         // 480p variant
@@ -58,6 +60,8 @@ class VideoConversionService {
                             '-hls_time 10',
                             '-hls_list_size 0',
                             '-f hls',
+                            '-preset ultrafast',
+                            '-threads 1'
                         ])
 
                         // 720p variant
@@ -74,6 +78,8 @@ class VideoConversionService {
                             '-hls_time 10',
                             '-hls_list_size 0',
                             '-f hls',
+                            '-preset ultrafast',
+                            '-threads 1'
                         ])
 
                         .on('progress', (progress) => {

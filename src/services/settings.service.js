@@ -3,23 +3,14 @@ import { AppError } from '../middlewares/error.middleware.js';
 import auditService from './audit.service.js';
 
 class SettingsService {
-    // Get a specific setting by key
-    async getSetting(key) {
-        const { data: setting, error } = await supabase
-            .from('system_settings')
-            .select('*')
-            .eq('setting_key', key)
-            .single();
-
-        if (error || !setting) {
-            throw new AppError(`Setting '${key}' not found`, 404);
-        }
-
-        return setting;
+    constructor() {
+        this.cache = null;
+        this.cacheExpiry = 0;
+        this.CACHE_TTL = 5 * 60 * 1000; // 5 minutes TTL
     }
 
-    // Get all settings
-    async getAllSettings() {
+    // Helper to refresh the cache of all settings
+    async _refreshCache() {
         const { data: settings, error } = await supabase
             .from('system_settings')
             .select('*')
@@ -29,7 +20,43 @@ class SettingsService {
             throw new AppError('Failed to fetch settings', 500);
         }
 
-        return settings || [];
+        this.cache = settings || [];
+        this.cacheExpiry = Date.now() + this.CACHE_TTL;
+        return this.cache;
+    }
+
+    // Get a specific setting by key
+    async getSetting(key) {
+        const now = Date.now();
+        
+        // Cache hit
+        if (this.cache && now < this.cacheExpiry) {
+            const setting = this.cache.find(s => s.setting_key === key);
+            if (setting) return setting;
+        }
+
+        // Cache miss - refresh and look up
+        const settings = await this._refreshCache();
+        const setting = settings.find(s => s.setting_key === key);
+
+        if (!setting) {
+            throw new AppError(`Setting '${key}' not found`, 404);
+        }
+
+        return setting;
+    }
+
+    // Get all settings
+    async getAllSettings() {
+        const now = Date.now();
+
+        // Cache hit
+        if (this.cache && now < this.cacheExpiry) {
+            return this.cache;
+        }
+
+        // Cache miss
+        return await this._refreshCache();
     }
 
     // Update a setting
@@ -57,6 +84,10 @@ class SettingsService {
         if (error) {
             throw new AppError('Failed to update setting', 500);
         }
+
+        // Invalidate in-memory cache to ensure fresh values are fetched next time
+        this.cache = null;
+        this.cacheExpiry = 0;
 
         // Log the change
         await auditService.log(
