@@ -269,6 +269,314 @@ class PaymentService {
 
         return data;
     }
+
+    /**
+     * Get payment statistics (admin only)
+     */
+    async getPaymentStats() {
+        const { data: allPayments, error } = await supabase
+            .from('payments')
+            .select('amount, status, payment_method');
+
+        if (error) {
+            throw new AppError('Failed to fetch payment statistics', 500);
+        }
+
+        let totalRevenue = 0;
+        let onlineRevenue = 0;
+        let offlineRevenue = 0;
+
+        const statusCounts = {
+            success: 0,
+            failed: 0,
+            pending: 0
+        };
+
+        allPayments?.forEach(payment => {
+            const amount = parseFloat(payment.amount) || 0;
+            const status = payment.status === 'success' ? 'success' : (payment.status === 'failed' ? 'failed' : 'pending');
+            statusCounts[status]++;
+
+            if (payment.status === 'success') {
+                totalRevenue += amount;
+                if (payment.payment_method === 'offline') {
+                    offlineRevenue += amount;
+                } else {
+                    onlineRevenue += amount;
+                }
+            }
+        });
+
+        return {
+            totalRevenue,
+            onlineRevenue,
+            offlineRevenue,
+            totalPayments: allPayments?.length || 0,
+            successfulPayments: statusCounts.success,
+            failedPayments: statusCounts.failed,
+            pendingPayments: statusCounts.pending
+        };
+    }
+
+    /**
+     * Get advanced payment analytics (admin only)
+     */
+    async getAdvancedStats() {
+        const now = new Date();
+        const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+        const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString();
+        const endOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59).toISOString();
+
+        // Today's revenue
+        const { data: todayPayments } = await supabase
+            .from('payments')
+            .select('amount')
+            .eq('status', 'success')
+            .gte('created_at', startOfToday);
+
+        const todayRevenue = todayPayments?.reduce((sum, p) => sum + parseFloat(p.amount), 0) || 0;
+
+        // This month's revenue
+        const { data: thisMonthPayments } = await supabase
+            .from('payments')
+            .select('amount')
+            .eq('status', 'success')
+            .gte('created_at', startOfMonth);
+
+        const thisMonthRevenue = thisMonthPayments?.reduce((sum, p) => sum + parseFloat(p.amount), 0) || 0;
+
+        // Last month's revenue
+        const { data: lastMonthPayments } = await supabase
+            .from('payments')
+            .select('amount')
+            .eq('status', 'success')
+            .gte('created_at', startOfLastMonth)
+            .lte('created_at', endOfLastMonth);
+
+        const lastMonthRevenue = lastMonthPayments?.reduce((sum, p) => sum + parseFloat(p.amount), 0) || 0;
+
+        // All-time revenue
+        const { data: allPayments } = await supabase
+            .from('payments')
+            .select('amount')
+            .eq('status', 'success');
+
+        const totalRevenue = allPayments?.reduce((sum, p) => sum + parseFloat(p.amount), 0) || 0;
+
+        return {
+            todayRevenue,
+            thisMonthRevenue,
+            lastMonthRevenue,
+            totalRevenue,
+            todayCount: todayPayments?.length || 0,
+            thisMonthCount: thisMonthPayments?.length || 0,
+            lastMonthCount: lastMonthPayments?.length || 0,
+            totalCount: allPayments?.length || 0
+        };
+    }
+
+    /**
+     * Get revenue by month (last 12 months)
+     */
+    async getRevenueByMonth() {
+        const { data: payments, error } = await supabase
+            .from('payments')
+            .select('amount, created_at')
+            .eq('status', 'success')
+            .gte('created_at', new Date(new Date().setMonth(new Date().getMonth() - 12)).toISOString())
+            .order('created_at', { ascending: true });
+
+        if (error) {
+            throw new AppError('Failed to fetch revenue by month', 500);
+        }
+
+        const monthlyRevenue = {};
+        payments?.forEach(payment => {
+            const date = new Date(payment.created_at);
+            const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+
+            if (!monthlyRevenue[monthKey]) {
+                monthlyRevenue[monthKey] = {
+                    month: monthKey,
+                    revenue: 0,
+                    count: 0
+                };
+            }
+
+            monthlyRevenue[monthKey].revenue += parseFloat(payment.amount);
+            monthlyRevenue[monthKey].count += 1;
+        });
+
+        return Object.values(monthlyRevenue).sort((a, b) => a.month.localeCompare(b.month));
+    }
+
+    /**
+     * Get revenue by course
+     */
+    async getRevenueByCourse() {
+        const { data: payments, error } = await supabase
+            .from('payments')
+            .select(`
+                amount,
+                courses:course_id (
+                    id,
+                    title
+                )
+            `)
+            .eq('status', 'success');
+
+        if (error) {
+            throw new AppError('Failed to fetch revenue by course', 500);
+        }
+
+        const courseRevenue = {};
+        payments?.forEach(payment => {
+            const courseId = payment.courses?.id;
+            const courseTitle = payment.courses?.title || 'Unknown Course';
+
+            if (courseId) {
+                if (!courseRevenue[courseId]) {
+                    courseRevenue[courseId] = {
+                        courseId,
+                        courseTitle,
+                        revenue: 0,
+                        enrollments: 0
+                    };
+                }
+
+                courseRevenue[courseId].revenue += parseFloat(payment.amount);
+                courseRevenue[courseId].enrollments += 1;
+            }
+        });
+
+        return Object.values(courseRevenue).sort((a, b) => b.revenue - a.revenue);
+    }
+
+    /**
+     * Get filtered payments with advanced filters
+     */
+    async getFilteredPayments(filters = {}, page = 1, limit = 50) {
+        let query = supabase
+            .from('payments')
+            .select(`
+                *,
+                users:user_id (
+                    id,
+                    name,
+                    email
+                ),
+                courses:course_id (
+                    id,
+                    title
+                )
+            `, { count: 'exact' })
+            .order('created_at', { ascending: false });
+
+        if (filters.month) {
+            const [year, month] = filters.month.split('-');
+            const startDate = new Date(year, month - 1, 1).toISOString();
+            const endDate = new Date(year, month, 0, 23, 59, 59).toISOString();
+            query = query.gte('created_at', startDate).lte('created_at', endDate);
+        }
+
+        if (filters.courseId) {
+            query = query.eq('course_id', filters.courseId);
+        }
+
+        if (filters.paymentMethod) {
+            query = query.eq('payment_method', filters.paymentMethod);
+        }
+
+        if (filters.status) {
+            query = query.eq('status', filters.status);
+        }
+
+        const offset = (page - 1) * limit;
+        query = query.range(offset, offset + limit - 1);
+
+        const { data: payments, error, count } = await query;
+
+        if (error) {
+            throw new AppError('Failed to fetch filtered payments', 500);
+        }
+
+        return {
+            payments,
+            pagination: {
+                page,
+                limit,
+                total: count,
+                totalPages: Math.ceil(count / limit)
+            }
+        };
+    }
+
+    /**
+     * Create offline enrollment
+     */
+    async offlineEnrollment(studentId, courseId, amount, adminId) {
+        try {
+            // Get course validity
+            const { data: course, error: courseError } = await supabase
+                .from('courses')
+                .select('validity_days, title')
+                .eq('id', courseId)
+                .single();
+
+            if (courseError || !course) {
+                throw new AppError('Course not found', 404);
+            }
+
+            const validityDays = course.validity_days || 365;
+            const validUntil = new Date();
+            validUntil.setDate(validUntil.getDate() + validityDays);
+
+            // Create offline payment record
+            const { data: payment, error: paymentError } = await supabase
+                .from('payments')
+                .insert({
+                    user_id: studentId,
+                    course_id: courseId,
+                    amount: amount,
+                    status: 'success',
+                    payment_method: 'offline',
+                    paid_at: new Date().toISOString(),
+                })
+                .select()
+                .single();
+
+            if (paymentError) {
+                throw new AppError('Failed to create offline payment record', 500);
+            }
+
+            // Create enrollment record
+            const { data: enrollment, error: enrollError } = await supabase
+                .from('enrollments')
+                .insert({
+                    user_id: studentId,
+                    course_id: courseId,
+                    payment_id: payment.id,
+                    status: 'active',
+                    valid_until: validUntil.toISOString(),
+                })
+                .select()
+                .single();
+
+            if (enrollError) {
+                throw new AppError('Failed to create enrollment', 500);
+            }
+
+            return {
+                message: 'Offline enrollment created successfully',
+                payment,
+                enrollment
+            };
+        } catch (error) {
+            console.error('Offline Enrollment Error:', error);
+            throw error instanceof AppError ? error : new AppError('Failed to complete offline enrollment', 500);
+        }
+    }
 }
 
 export default new PaymentService();
