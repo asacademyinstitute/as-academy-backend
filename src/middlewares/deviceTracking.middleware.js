@@ -29,10 +29,10 @@ export const trackDevice = async (req, res, next) => {
         // Store device ID in request for later use
         req.deviceId = deviceId;
 
-        // Update or insert device record
         const supabase = (await import('../config/database.js')).default;
 
-        const { error } = await supabase
+        // For all users, use upsert to track devices
+        await supabase
             .from('user_devices')
             .upsert({
                 user_id: req.user.id,
@@ -45,10 +45,6 @@ export const trackDevice = async (req, res, next) => {
                 onConflict: 'user_id,device_id'
             });
 
-        if (error) {
-            console.error('Device tracking error:', error);
-        }
-
         next();
     } catch (error) {
         console.error('Device tracking error:', error);
@@ -56,7 +52,7 @@ export const trackDevice = async (req, res, next) => {
     }
 };
 
-// Check device limit for students
+// Check device limit for students - use global device limit setting
 export const checkDeviceLimit = async (req, res, next) => {
     if (!req.user || req.user.role !== 'student') {
         return next();
@@ -65,7 +61,16 @@ export const checkDeviceLimit = async (req, res, next) => {
     try {
         const deviceId = req.deviceId || generateDeviceId(req);
         const supabase = (await import('../config/database.js')).default;
-        const { config } = await import('../config/config.js');
+        const settingsService = (await import('../services/settings.service.js')).default;
+
+        // Check if device restriction enforcement is globally enabled
+        const trackingEnabled = await settingsService.getSetting('device_tracking_enabled').catch(() => ({ setting_value: 'true' }));
+        if (trackingEnabled.setting_value !== 'true') {
+            return next();
+        }
+
+        // Get global device limit for all students
+        const deviceLimit = await settingsService.getStudentDeviceLimit();
 
         // Get all devices for this user
         const { data: devices, error } = await supabase
@@ -78,14 +83,25 @@ export const checkDeviceLimit = async (req, res, next) => {
             return next();
         }
 
+        if (!devices || devices.length === 0) {
+            // First login - allow and device will be registered
+            return next();
+        }
+
         // Check if current device is already registered
         const isDeviceRegistered = devices.some(d => d.device_id === deviceId);
 
-        if (!isDeviceRegistered && devices.length >= config.maxDevicesPerStudent) {
+        if (isDeviceRegistered) {
+            // Device already registered - allow
+            return next();
+        }
+
+        // New device - check if global limit reached
+        if (devices.length >= deviceLimit) {
             const { AppError } = await import('./error.middleware.js');
             return next(
                 new AppError(
-                    'Device limit reached. You can only access from one device. Please contact admin to reset your device.',
+                    'Your account has reached the maximum allowed devices. Contact admin.',
                     403
                 )
             );

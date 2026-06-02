@@ -2,7 +2,7 @@ import jwt from 'jsonwebtoken';
 import { config } from '../config/config.js';
 import { AppError } from './error.middleware.js';
 import supabase from '../config/database.js';
-import { validateDevice } from './validateDevice.middleware.js';
+import { generateDeviceId } from './deviceTracking.middleware.js';
 
 export const authenticate = async (req, res, next) => {
     try {
@@ -34,32 +34,19 @@ export const authenticate = async (req, res, next) => {
             throw new AppError('Your account has been blocked. Please contact admin.', 403);
         }
 
-        // CRITICAL: For students ONLY, enforce single active session
-        // Check if at least one valid refresh token exists in database
-        if (user.role === 'student') {
-            const { data: validTokens, error: tokenError } = await supabase
-                .from('refresh_tokens')
-                .select('id')
-                .eq('user_id', user.id)
-                .eq('revoked', false)
-                .gt('expires_at', new Date().toISOString())
-                .limit(1);
-
-            if (tokenError || !validTokens || validTokens.length === 0) {
-                throw new AppError('Session expired on another device. Please login again.', 401);
+        // For students, validate device_id from JWT matches current device
+        if (user.role === 'student' && decoded.deviceId) {
+            const currentDeviceId = generateDeviceId(req);
+            if (decoded.deviceId !== currentDeviceId) {
+                throw new AppError(
+                    'This student account is locked to one device. Contact admin to change device.',
+                    403
+                );
             }
         }
 
-        // Attach user AND decoded JWT data to request
-        req.user = {
-            ...user,
-            userId: decoded.userId, // From JWT
-            role: decoded.role,     // From JWT
-            deviceId: decoded.deviceId // From JWT (for students only)
-        };
-
-        // DO NOT call validateDevice here - it should be added explicitly to protected routes only
-        // Auth routes (/login, /signup, /me) should NOT have device validation
+        // Attach user to request
+        req.user = user;
         next();
     } catch (error) {
         if (error.name === 'JsonWebTokenError') {

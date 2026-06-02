@@ -18,6 +18,9 @@ import quizRoutes from './src/routes/quiz.routes.js';
 import certificateRoutes from './src/routes/certificate.routes.js';
 import auditRoutes from './src/routes/audit.routes.js';
 import aiRoutes from './src/routes/ai.routes.js';
+import settingsRoutes from './src/routes/settings.routes.js';
+import securityRoutes from './src/routes/security.routes.js';
+import notificationRoutes from './src/routes/notification.routes.js';
 import deviceRoutes from './src/routes/device.routes.js';
 import courseRequestRoutes from './src/routes/courseRequest.routes.js';
 import couponRoutes from './src/routes/coupon.routes.js';
@@ -32,7 +35,7 @@ app.set('trust proxy', 1);
 // Security middleware
 app.use(helmet());
 
-// CORS configuration - Allow Vercel preview deployments
+// CORS configuration - Allow Vercel preview deployments + asacademy.site
 app.use(cors({
     origin: (origin, callback) => {
         // Allow requests with no origin (like mobile apps, Postman, etc.)
@@ -103,6 +106,9 @@ app.use('/api/quizzes', quizRoutes);
 app.use('/api/certificates', certificateRoutes);
 app.use('/api/audit', auditRoutes);
 app.use('/api/ai', aiRoutes);
+app.use('/api/settings', settingsRoutes);
+app.use('/api/security', securityRoutes);
+app.use('/api/notifications', notificationRoutes);
 app.use('/api/devices', deviceRoutes);
 app.use('/api/course-requests', courseRequestRoutes);
 app.use('/api/coupons', couponRoutes);
@@ -132,6 +138,5 @@ app.listen(PORT, () => {
         : `http://localhost:${PORT}/health`;
     console.log(`🔗 Health check: ${healthUrl}`);
 });
-
 
 export default app;

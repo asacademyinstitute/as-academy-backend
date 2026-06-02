@@ -1,132 +1,82 @@
-import { Router } from 'express';
+import express from 'express';
 import paymentService from '../services/payment.service.js';
-import { asyncHandler } from '../middlewares/error.middleware.js';
 import { authenticate } from '../middlewares/auth.middleware.js';
-import { isAdmin, isStudent } from '../middlewares/rbac.middleware.js';
-import { paginationValidation } from '../middlewares/validation.middleware.js';
 
-const router = Router();
+const router = express.Router();
 
-// Create Razorpay order (student)
-router.post('/create-order', authenticate, isStudent, asyncHandler(async (req, res) => {
-    const { courseId, couponCode } = req.body;
+/**
+ * Create Razorpay order
+ * POST /api/payments/create-order
+ */
+router.post('/create-order', authenticate, async (req, res, next) => {
+    try {
+        const { courseId, amount } = req.body;
+        const userId = req.user.id;
 
-    const order = await paymentService.createOrder(req.user.id, courseId, couponCode);
+        const order = await paymentService.createOrder(amount, courseId, userId);
 
-    res.json({
-        success: true,
-        message: 'Order created successfully',
-        data: order
-    });
-}));
+        res.status(200).json({
+            success: true,
+            data: order,
+        });
+    } catch (error) {
+        next(error);
+    }
+});
 
-// Verify payment (student)
-router.post('/verify', authenticate, isStudent, asyncHandler(async (req, res) => {
-    const result = await paymentService.verifyPayment(req.body);
+/**
+ * Verify payment
+ * POST /api/payments/verify
+ */
+router.post('/verify', authenticate, async (req, res, next) => {
+    try {
+        const { orderId, paymentId, signature } = req.body;
 
-    res.json({
-        success: true,
-        message: result.message,
-        data: result.enrollment
-    });
-}));
+        const result = await paymentService.processPayment(orderId, paymentId, signature);
 
-// Offline enrollment (admin only)
-router.post('/offline-enroll', authenticate, isAdmin, asyncHandler(async (req, res) => {
-    const { studentId, courseId, amount } = req.body;
+        res.status(200).json({
+            success: true,
+            data: result,
+        });
+    } catch (error) {
+        next(error);
+    }
+});
 
-    const result = await paymentService.offlineEnrollment(studentId, courseId, amount, req.user.id);
+/**
+ * Razorpay webhook
+ * POST /api/payments/webhook
+ */
+router.post('/webhook', async (req, res, next) => {
+    try {
+        const signature = req.headers['x-razorpay-signature'];
+        const event = req.body;
 
-    res.json({
-        success: true,
-        message: result.message,
-        data: {
-            payment: result.payment,
-            enrollment: result.enrollment
-        }
-    });
-}));
+        await paymentService.handleWebhook(event, signature);
 
-// Get payment history
-router.get('/history', authenticate, paginationValidation, asyncHandler(async (req, res) => {
-    const { studentId, courseId, status, paymentMethod, page = 1, limit = 50 } = req.query;
+        res.status(200).json({ success: true });
+    } catch (error) {
+        next(error);
+    }
+});
 
-    // Students can only see their own payments
-    const filters = {
-        studentId: req.user.role === 'student' ? req.user.id : studentId,
-        courseId,
-        status,
-        paymentMethod
-    };
+/**
+ * Get payment history
+ * GET /api/payments/history
+ */
+router.get('/history', authenticate, async (req, res, next) => {
+    try {
+        const userId = req.user.id;
 
-    const result = await paymentService.getPaymentHistory(filters, parseInt(page), parseInt(limit));
+        const payments = await paymentService.getPaymentHistory(userId);
 
-    res.json({
-        success: true,
-        data: result
-    });
-}));
-
-// Get payment statistics (admin only)
-router.get('/stats', authenticate, isAdmin, asyncHandler(async (req, res) => {
-    const stats = await paymentService.getPaymentStats();
-
-    res.json({
-        success: true,
-        data: stats
-    });
-}));
-
-// Get advanced payment analytics (admin only)
-router.get('/analytics/advanced', authenticate, isAdmin, asyncHandler(async (req, res) => {
-    const stats = await paymentService.getAdvancedStats();
-
-    res.json({
-        success: true,
-        data: stats
-    });
-}));
-
-// Get revenue by month (admin only)
-router.get('/analytics/by-month', authenticate, isAdmin, asyncHandler(async (req, res) => {
-    const data = await paymentService.getRevenueByMonth();
-
-    res.json({
-        success: true,
-        data
-    });
-}));
-
-// Get revenue by course (admin only)
-router.get('/analytics/by-course', authenticate, isAdmin, asyncHandler(async (req, res) => {
-    const data = await paymentService.getRevenueByCourse();
-
-    res.json({
-        success: true,
-        data
-    });
-}));
-
-// Get filtered payments (admin only)
-router.get('/filtered', authenticate, isAdmin, paginationValidation, asyncHandler(async (req, res) => {
-    const { month, courseId, paymentMethod, status, page = 1, limit = 50 } = req.query;
-
-    const filters = { month, courseId, paymentMethod, status };
-    const result = await paymentService.getFilteredPayments(filters, parseInt(page), parseInt(limit));
-
-    res.json({
-        success: true,
-        data: result
-    });
-}));
-
-// Razorpay webhook
-router.post('/webhook', asyncHandler(async (req, res) => {
-    const signature = req.headers['x-razorpay-signature'];
-
-    await paymentService.handleWebhook(req.body, signature);
-
-    res.json({ success: true });
-}));
+        res.status(200).json({
+            success: true,
+            data: payments,
+        });
+    } catch (error) {
+        next(error);
+    }
+});
 
 export default router;

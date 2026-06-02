@@ -83,4 +83,22 @@ router.get('/me', authenticate, asyncHandler(async (req, res) => {
     });
 }));
 
+// Admin: Reset student device (admin only)
+router.post('/admin/reset-device/:userId', authenticate, asyncHandler(async (req, res) => {
+    // Check if user is admin
+    if (req.user.role !== 'admin') {
+        return res.status(403).json({
+            success: false,
+            message: 'Only admins can reset student devices'
+        });
+    }
+
+    const result = await authService.resetDevice(req.params.userId);
+
+    res.json({
+        success: true,
+        message: result.message
+    });
+}));
+
 export default router;

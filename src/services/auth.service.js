@@ -4,11 +4,12 @@ import { v4 as uuidv4 } from 'uuid';
 import supabase from '../config/database.js';
 import { config } from '../config/config.js';
 import { AppError } from '../middlewares/error.middleware.js';
+import settingsService from './settings.service.js';
 
 class AuthService {
     // Register new user
     async register(userData) {
-        const { name, email, phone, password, college_name, semester, role = 'student', deviceId } = userData;
+        const { name, email, phone, password, college_name, semester, role = 'student' } = userData;
 
         // Check if user already exists
         const { data: existingUser } = await supabase
@@ -45,8 +46,8 @@ class AuthService {
             throw new AppError('Failed to create user', 500);
         }
 
-        // Generate tokens (deviceId optional, will be bound for students if provided)
-        const { accessToken, refreshToken } = await this.generateTokens(user.id, user.role, deviceId);
+        // Generate tokens
+        const { accessToken, refreshToken } = await this.generateTokens(user.id, user.role);
 
         return {
             user,
@@ -79,30 +80,12 @@ class AuthService {
             throw new AppError('Invalid email or password', 401);
         }
 
-        // For students ONLY, check device limit (admin/teacher exempt)
+        // For students, check device limit
         if (user.role === 'student' && deviceId) {
             await this.checkDeviceLimit(user.id, deviceId);
         }
 
-        // CRITICAL: For students, enforce SINGLE ACTIVE SESSION
-        // Revoke ALL existing tokens before issuing new one
-        if (user.role === 'student') {
-            console.log(`🔒 Enforcing single session for student ${user.id} - revoking all existing tokens`);
-
-            const { error: revokeError } = await supabase
-                .from('refresh_tokens')
-                .delete()
-                .eq('user_id', user.id);
-
-            if (revokeError) {
-                console.error('Failed to revoke existing tokens:', revokeError);
-                // Continue anyway - new token will be issued
-            } else {
-                console.log(`✅ Revoked all existing tokens for student ${user.id}`);
-            }
-        }
-
-        // Generate tokens (deviceId optional for admin/teacher, required for students)
+        // Generate tokens
         const { accessToken, refreshToken } = await this.generateTokens(user.id, user.role, deviceId);
 
         // Remove password from response
@@ -117,24 +100,20 @@ class AuthService {
 
     // Generate access and refresh tokens
     async generateTokens(userId, role, deviceId = null) {
-        // For students, device ID is REQUIRED and bound to token
-        // For admin/teacher, device ID is optional and not bound
-        const tokenPayload = { userId, role };
-
+        // Include device_id in JWT for students to validate on every request
+        const payload = { userId, role };
         if (role === 'student' && deviceId) {
-            tokenPayload.deviceId = deviceId; // Bind device to token
+            payload.deviceId = deviceId;
         }
 
         const accessToken = jwt.sign(
-            tokenPayload,
+            payload,
             config.jwtSecret,
             { expiresIn: config.jwtExpiresIn }
         );
 
-        const refreshTokenPayload = { ...tokenPayload, tokenId: uuidv4() };
-
         const refreshToken = jwt.sign(
-            refreshTokenPayload,
+            { userId, role, tokenId: uuidv4() },
             config.jwtRefreshSecret,
             { expiresIn: config.jwtRefreshExpiresIn }
         );
@@ -170,24 +149,17 @@ class AuthService {
                 .single();
 
             if (error || !tokenRecord) {
-                throw new AppError('Session expired. Please login again.', 401);
+                throw new AppError('Invalid refresh token', 401);
             }
 
             // Check if token is expired
             if (new Date(tokenRecord.expires_at) < new Date()) {
-                throw new AppError('Refresh token expired. Please login again.', 401);
+                throw new AppError('Refresh token expired', 401);
             }
 
-            // Generate new access token with same payload as original
-            const tokenPayload = { userId: decoded.userId, role: decoded.role };
-
-            // For students, include deviceId in new access token
-            if (decoded.role === 'student' && decoded.deviceId) {
-                tokenPayload.deviceId = decoded.deviceId;
-            }
-
+            // Generate new access token
             const accessToken = jwt.sign(
-                tokenPayload,
+                { userId: decoded.userId, role: decoded.role },
                 config.jwtSecret,
                 { expiresIn: config.jwtExpiresIn }
             );
@@ -195,7 +167,7 @@ class AuthService {
             return { accessToken };
         } catch (error) {
             if (error.name === 'JsonWebTokenError' || error.name === 'TokenExpiredError') {
-                throw new AppError('Invalid or expired refresh token. Please login again.', 401);
+                throw new AppError('Invalid or expired refresh token', 401);
             }
             throw error;
         }
@@ -216,94 +188,37 @@ class AuthService {
         return { success: true };
     }
 
-    // Check device limit for students
+    // Check device limit for students - use global device limit setting
     async checkDeviceLimit(userId, currentDeviceId) {
-        // First check if device enforcement is enabled globally
-        const { data: enforcementSetting } = await supabase
-            .from('system_settings')
-            .select('setting_value')
-            .eq('setting_key', 'device_tracking_enabled')
-            .single();
+        // Get global device limit for all students
+        const deviceLimit = await settingsService.getStudentDeviceLimit();
 
-        const isEnforcementEnabled = enforcementSetting?.setting_value === 'true';
+        const { data: devices } = await supabase
+            .from('user_devices')
+            .select('device_id')
+            .eq('user_id', userId);
 
-        // If enforcement is disabled, skip all device checks
-        if (!isEnforcementEnabled) {
-            console.log(`✅ Device enforcement disabled - skipping device limit check for user ${userId}`);
+        if (!devices || devices.length === 0) {
+            // First login - allow
             return;
         }
 
-        // Get global device limit from database
-        const { data: settingData } = await supabase
-            .from('system_settings')
-            .select('setting_value')
-            .eq('setting_key', 'max_devices_per_student')
-            .single();
-
-        const maxDevices = settingData ? parseInt(settingData.setting_value) : 1;
-
-        // Get user's devices
-        const { data: devices } = await supabase
-            .from('user_devices')
-            .select('device_id, is_blocked')
-            .eq('user_id', userId);
-
-        if (!devices) return;
-
-        // Check if current device is blocked
-        const blockedDevice = devices.find(d => d.device_id === currentDeviceId && d.is_blocked);
-        if (blockedDevice) {
-            throw new AppError('This device has been blocked by admin. Please contact support.', 403);
-        }
-
+        // Check if current device is already registered
         const isDeviceRegistered = devices.some(d => d.device_id === currentDeviceId);
 
-        if (!isDeviceRegistered && devices.length >= maxDevices) {
+        if (isDeviceRegistered) {
+            // Device already registered - allow
+            return;
+        }
+
+        // New device - check if global limit reached
+        if (devices.length >= deviceLimit) {
             throw new AppError(
-                `Device limit reached. You can only access from ${maxDevices} device(s). Please contact admin to reset your device.`,
+                'Your account has reached the maximum allowed devices. Contact admin.',
                 403
             );
         }
-
-        // Update or insert device record
-        if (isDeviceRegistered) {
-            // Update existing device - increment login count
-            const { data: currentDevice } = await supabase
-                .from('user_devices')
-                .select('login_count')
-                .eq('user_id', userId)
-                .eq('device_id', currentDeviceId)
-                .single();
-
-            await supabase
-                .from('user_devices')
-                .update({
-                    login_count: (currentDevice?.login_count || 0) + 1,
-                    last_login_at: new Date().toISOString(),
-                    last_active: new Date().toISOString()
-                })
-                .eq('user_id', userId)
-                .eq('device_id', currentDeviceId);
-        } else {
-            // Track device change if user had previous devices
-            if (devices.length > 0) {
-                const { data: userDevices } = await supabase
-                    .from('user_devices')
-                    .select('device_changes_count')
-                    .eq('user_id', userId)
-                    .limit(1)
-                    .single();
-
-                await supabase
-                    .from('user_devices')
-                    .update({
-                        device_changes_count: (userDevices?.device_changes_count || 0) + 1
-                    })
-                    .eq('user_id', userId);
-            }
-        }
     }
-
 
     // Reset device for student (admin only)
     async resetDevice(userId) {
