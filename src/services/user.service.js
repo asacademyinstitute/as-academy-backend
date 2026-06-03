@@ -217,27 +217,86 @@ class UserService {
 
     // Get user statistics
     async getUserStats(userId) {
-        // Get enrolled courses count
+        // Fetch user role first
+        const { data: user, error: userError } = await supabase
+            .from('users')
+            .select('role')
+            .eq('id', userId)
+            .single();
+
+        if (userError || !user) {
+            throw new AppError('User not found', 404);
+        }
+
+        if (user.role === 'teacher') {
+            // Teacher Stats
+            const { count: coursesCount } = await supabase
+                .from('courses')
+                .select('*', { count: 'exact', head: true })
+                .eq('teacher_id', userId);
+
+            const { data: teacherCourses } = await supabase
+                .from('courses')
+                .select('id')
+                .eq('teacher_id', userId);
+
+            let uniqueStudentsCount = 0;
+            let totalLecturesCount = 0;
+
+            if (teacherCourses && teacherCourses.length > 0) {
+                const courseIds = teacherCourses.map(c => c.id);
+
+                // Enrolled students count (active only)
+                const { data: enrollments } = await supabase
+                    .from('enrollments')
+                    .select('student_id')
+                    .in('course_id', courseIds)
+                    .eq('status', 'active');
+
+                const uniqueStudents = new Set(enrollments?.map(e => e.student_id) || []);
+                uniqueStudentsCount = uniqueStudents.size;
+
+                // Content count (lectures)
+                const { data: chapters } = await supabase
+                    .from('chapters')
+                    .select('id')
+                    .in('course_id', courseIds);
+
+                if (chapters && chapters.length > 0) {
+                    const chapterIds = chapters.map(ch => ch.id);
+                    const { count: lecturesCount } = await supabase
+                        .from('lectures')
+                        .select('*', { count: 'exact', head: true })
+                        .in('chapter_id', chapterIds);
+                    totalLecturesCount = lecturesCount || 0;
+                }
+            }
+
+            return {
+                totalCourses: coursesCount || 0,
+                totalStudents: uniqueStudentsCount || 0,
+                totalLectures: totalLecturesCount || 0
+            };
+        }
+
+        // Student Stats (default)
         const { count: coursesCount } = await supabase
             .from('enrollments')
             .select('*', { count: 'exact', head: true })
             .eq('student_id', userId)
             .eq('status', 'active');
 
-        // Get completed lectures count
         const { count: completedLectures } = await supabase
             .from('lecture_progress')
             .select('*', { count: 'exact', head: true })
             .eq('student_id', userId)
             .eq('completed', true);
 
-        // Get certificates count
         const { count: certificatesCount } = await supabase
             .from('certificates')
             .select('*', { count: 'exact', head: true })
             .eq('student_id', userId);
 
-        // Get quiz attempts count
         const { count: quizAttempts } = await supabase
             .from('quiz_attempts')
             .select('*', { count: 'exact', head: true })
