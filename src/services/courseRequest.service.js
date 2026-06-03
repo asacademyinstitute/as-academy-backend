@@ -6,7 +6,7 @@ import courseService from './course.service.js';
 class CourseRequestService {
     // Create new course request (teacher only)
     async createRequest(teacherId, data) {
-        const { title, description, price, validity_days, thumbnail_url, category, level } = data;
+        const { title, description, price, validity_days, thumbnail_url, category, semester, level } = data;
 
         console.log('📝 [SERVICE] Creating course request:', { teacherId, title, price, validity_days });
 
@@ -24,6 +24,7 @@ class CourseRequestService {
             validity_days,
             thumbnail_url,
             category,
+            semester,
             level,
             status: 'pending'
         };
@@ -155,6 +156,9 @@ class CourseRequestService {
             validity_days: request.validity_days,
             thumbnail_url: request.thumbnail_url,
             teacher_id: request.teacher_id,
+            category: request.category,
+            semester: request.semester,
+            level: request.level,
             status: 'active'
         };
 
@@ -237,7 +241,7 @@ class CourseRequestService {
 
     // Update request (admin can edit before approval)
     async updateRequest(requestId, updateData, adminId) {
-        const allowedFields = ['title', 'description', 'price', 'validity_days', 'thumbnail_url', 'category', 'level'];
+        const allowedFields = ['title', 'description', 'price', 'validity_days', 'thumbnail_url', 'category', 'semester', 'level'];
         const updates = {};
 
         for (const field of allowedFields) {

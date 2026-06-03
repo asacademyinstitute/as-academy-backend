@@ -106,7 +106,7 @@ class CourseService {
 
     // Create course
     async createCourse(courseData, userId) {
-        const { title, description, price, validity_days, teacher_id, thumbnail_url } = courseData;
+        const { title, description, price, validity_days, teacher_id, thumbnail_url, category, semester, level } = courseData;
 
         const { data: course, error } = await supabase
             .from('courses')
@@ -117,6 +117,9 @@ class CourseService {
                 validity_days,
                 teacher_id,
                 thumbnail_url,
+                category,
+                semester,
+                level: level || 'beginner',
                 status: 'active'
             })
             .select()
@@ -138,7 +141,7 @@ class CourseService {
 
     // Update course
     async updateCourse(courseId, updateData, userId) {
-        const allowedFields = ['title', 'description', 'price', 'validity_days', 'teacher_id', 'thumbnail_url', 'status', 'live_class_link', 'live_class_scheduled_at', 'live_class_title'];
+        const allowedFields = ['title', 'description', 'price', 'validity_days', 'teacher_id', 'thumbnail_url', 'status', 'live_class_link', 'live_class_scheduled_at', 'live_class_title', 'category', 'semester', 'level'];
         const updates = {};
 
         for (const field of allowedFields) {
