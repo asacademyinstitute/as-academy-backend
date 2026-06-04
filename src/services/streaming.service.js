@@ -164,18 +164,21 @@ class StreamingService {
     _extractB2FileName(fileUrl) {
         if (!fileUrl) return null;
         
+        // Strip query parameters (like ?Authorization=...)
+        const cleanUrl = fileUrl.split('?')[0];
+        
         // If it's already a relative path (e.g. lectures/xxx.pdf)
-        if (!fileUrl.startsWith('http')) {
-            return fileUrl;
+        if (!cleanUrl.startsWith('http')) {
+            return cleanUrl;
         }
 
         // If it's a full B2 URL: https://f003.backblazeb2.com/file/bucket-name/lectures/xxx.pdf
-        const match = fileUrl.match(/\/file\/[^/]+\/(.+)$/);
+        const match = cleanUrl.match(/\/file\/[^/]+\/(.+)$/);
         if (match && match[1]) {
             return decodeURIComponent(match[1]);
         }
 
-        return fileUrl;
+        return cleanUrl;
     }
 
     // Generate signature for URL validation (legacy support)
