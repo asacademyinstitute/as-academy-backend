@@ -111,14 +111,26 @@ class UserService {
     }
 
     // Update user
-    async updateUser(userId, updateData, adminId) {
+    async updateUser(userId, updateData, caller) {
+        const isCallerAdmin = caller && typeof caller === 'object' && caller.role === 'admin';
+        const adminId = caller && typeof caller === 'object' ? caller.id : caller;
+
         const allowedFields = ['name', 'phone', 'enrollment_number', 'college_name', 'semester', 'status'];
+        if (isCallerAdmin) {
+            allowedFields.push('role');
+        }
+
         const updates = {};
 
         for (const field of allowedFields) {
             if (updateData[field] !== undefined) {
                 updates[field] = updateData[field];
             }
+        }
+
+        // Hash password if admin is setting a new password
+        if (isCallerAdmin && updateData.password) {
+            updates.password_hash = await bcrypt.hash(updateData.password, config.bcryptRounds);
         }
 
         if (Object.keys(updates).length === 0) {
@@ -134,6 +146,14 @@ class UserService {
 
         if (error) {
             throw new AppError('Failed to update user', 500);
+        }
+
+        // Revoke active sessions (refresh tokens) if password was updated
+        if (isCallerAdmin && updateData.password) {
+            await supabase
+                .from('refresh_tokens')
+                .update({ revoked: true })
+                .eq('user_id', userId);
         }
 
         // Log action

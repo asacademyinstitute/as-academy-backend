@@ -15,7 +15,7 @@ export const validateDevice = async (req, res, next) => {
 
         // Skip validation for Admin and Teacher (they don't have deviceId in token)
         if (req.user.role === 'admin' || req.user.role === 'teacher') {
-            console.log(`✅ Device validation skipped for ${req.user.role}: ${req.user.userId}`);
+            console.log(`✅ Device validation skipped for ${req.user.role}: ${req.user.id}`);
             return next();
         }
 
@@ -33,7 +33,7 @@ export const validateDevice = async (req, res, next) => {
 
             // If enforcement is disabled, skip validation
             if (!isEnforcementEnabled) {
-                console.log(`✅ Device enforcement disabled - skipping validation for student: ${req.user.userId}`);
+                console.log(`✅ Device enforcement disabled - skipping validation for student: ${req.user.id}`);
                 return next();
             }
 
@@ -42,13 +42,13 @@ export const validateDevice = async (req, res, next) => {
 
             // If token doesn't have deviceId, skip validation (backward compatibility)
             if (!tokenDeviceId) {
-                console.log(`⚠️ Student token without deviceId (legacy): ${req.user.userId}`);
+                console.log(`⚠️ Student token without deviceId (legacy): ${req.user.id}`);
                 return next();
             }
 
             // If token has device ID but request doesn't
             if (tokenDeviceId && !requestDeviceId) {
-                console.error(`🚫 Device validation failed for user ${req.user.userId}: No device ID in request`);
+                console.error(`🚫 Device validation failed for user ${req.user.id}: No device ID in request`);
                 const error = new AppError('Session invalidated due to device reset or device change', 403);
                 error.code = 'DEVICE_SESSION_INVALID';
                 return next(error);
@@ -56,20 +56,20 @@ export const validateDevice = async (req, res, next) => {
 
             // If device IDs don't match
             if (tokenDeviceId && requestDeviceId && tokenDeviceId !== requestDeviceId) {
-                console.error(`🚫 Device mismatch for user ${req.user.userId}: Token=${tokenDeviceId.substring(0, 8)}... Request=${requestDeviceId.substring(0, 8)}...`);
+                console.error(`🚫 Device mismatch for user ${req.user.id}: Token=${tokenDeviceId.substring(0, 8)}... Request=${requestDeviceId.substring(0, 8)}...`);
 
                 // Revoke all tokens for this user (force logout)
                 await supabase
                     .from('refresh_tokens')
                     .update({ revoked: true })
-                    .eq('user_id', req.user.userId);
+                    .eq('user_id', req.user.id);
 
                 const error = new AppError('Session invalidated due to device reset or device change', 403);
                 error.code = 'DEVICE_SESSION_INVALID';
                 return next(error);
             }
 
-            console.log(`✅ Device validated for student: ${req.user.userId}`);
+            console.log(`✅ Device validated for student: ${req.user.id}`);
         }
 
         next();

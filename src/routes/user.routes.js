@@ -47,7 +47,7 @@ router.post('/', authenticate, isAdmin, asyncHandler(async (req, res) => {
 
 // Update user
 router.put('/:id', authenticate, isAdminOrSelf, asyncHandler(async (req, res) => {
-    const user = await userService.updateUser(req.params.id, req.body, req.user.id);
+    const user = await userService.updateUser(req.params.id, req.body, req.user);
 
     res.json({
         success: true,

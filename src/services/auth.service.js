@@ -132,6 +132,24 @@ class AuthService {
                 expires_at: expiresAt.toISOString()
             });
 
+        // Register/update device in user_devices (only for students)
+        if (role === 'student' && deviceId) {
+            try {
+                await supabase
+                    .from('user_devices')
+                    .upsert({
+                        user_id: userId,
+                        device_id: deviceId,
+                        device_name: 'Registered Device',
+                        last_active: new Date().toISOString()
+                    }, {
+                        onConflict: 'user_id,device_id'
+                    });
+            } catch (deviceRegError) {
+                console.error('Failed to register device during login:', deviceRegError);
+            }
+        }
+
         return { accessToken, refreshToken };
     }
 
@@ -223,14 +241,20 @@ class AuthService {
 
     // Reset device for student (admin only)
     async resetDevice(userId) {
-        const { error } = await supabase
+        const { error: deviceError } = await supabase
             .from('user_devices')
             .delete()
             .eq('user_id', userId);
 
-        if (error) {
+        if (deviceError) {
             throw new AppError('Failed to reset device', 500);
         }
+
+        // Also delete/revoke active refresh tokens to force the student to re-login
+        await supabase
+            .from('refresh_tokens')
+            .delete()
+            .eq('user_id', userId);
 
         return { success: true, message: 'Device reset successfully' };
     }

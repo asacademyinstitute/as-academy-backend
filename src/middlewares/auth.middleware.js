@@ -33,8 +33,69 @@ export const authenticate = async (req, res, next) => {
             throw new AppError('Your account has been blocked. Please contact admin.', 403);
         }
 
-        // Attach user to request
-        req.user = user;
+        // Attach user to request (including device ID from JWT)
+        req.user = { ...user, deviceId: decoded.deviceId };
+
+        // Handle device tracking and validation for students
+        if (user.role === 'student') {
+            const tokenDeviceId = decoded.deviceId;
+            const requestDeviceId = req.headers['x-device-id'];
+
+            // 1. Device Tracking: Upsert device details
+            try {
+                const activeDeviceId = tokenDeviceId || requestDeviceId;
+                if (activeDeviceId) {
+                    const userAgent = req.headers['user-agent'] || '';
+                    const ip = req.ip || req.connection.remoteAddress || '';
+                    
+                    await supabase
+                        .from('user_devices')
+                        .upsert({
+                            user_id: user.id,
+                            device_id: activeDeviceId,
+                            device_name: extractDeviceName(userAgent),
+                            ip_address: ip,
+                            user_agent: userAgent,
+                            last_active: new Date().toISOString()
+                        }, {
+                            onConflict: 'user_id,device_id'
+                        });
+                }
+            } catch (trackError) {
+                console.error('Device auto-tracking error in authenticate:', trackError);
+            }
+
+            // 2. Device Validation (only if global enforcement is enabled)
+            const { data: enforcementSetting } = await supabase
+                .from('system_settings')
+                .select('setting_value')
+                .eq('setting_key', 'device_tracking_enabled')
+                .single();
+
+            const isEnforcementEnabled = enforcementSetting?.setting_value === 'true';
+
+            if (isEnforcementEnabled && tokenDeviceId) {
+                // If token has device ID but request header doesn't
+                if (!requestDeviceId) {
+                    console.error(`🚫 Device validation failed for student ${user.id}: No device ID in header`);
+                    throw new AppError('Session invalidated due to device reset or device change', 403);
+                }
+
+                // If device IDs don't match
+                if (requestDeviceId && tokenDeviceId !== requestDeviceId) {
+                    console.error(`🚫 Device mismatch for student ${user.id}: Token=${tokenDeviceId} Request=${requestDeviceId}`);
+                    
+                    // Revoke all refresh tokens
+                    await supabase
+                        .from('refresh_tokens')
+                        .update({ revoked: true })
+                        .eq('user_id', user.id);
+
+                    throw new AppError('Session invalidated due to device reset or device change', 403);
+                }
+            }
+        }
+
         next();
     } catch (error) {
         if (error.name === 'JsonWebTokenError') {
@@ -72,3 +133,15 @@ export const optionalAuth = async (req, res, next) => {
         next();
     }
 };
+
+// Helper: Extract device name from user agent
+function extractDeviceName(userAgent) {
+    if (!userAgent) return 'Unknown Device';
+    if (userAgent.includes('Windows')) return 'Windows PC';
+    if (userAgent.includes('Mac')) return 'Mac';
+    if (userAgent.includes('Linux')) return 'Linux PC';
+    if (userAgent.includes('iPhone')) return 'iPhone';
+    if (userAgent.includes('iPad')) return 'iPad';
+    if (userAgent.includes('Android')) return 'Android Device';
+    return 'Unknown Device';
+}
