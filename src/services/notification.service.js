@@ -1,5 +1,18 @@
 import supabase from '../config/database.js';
 import { AppError } from '../middlewares/error.middleware.js';
+import webpush from 'web-push';
+
+const vapidPublicKey = process.env.VAPID_PUBLIC_KEY;
+const vapidPrivateKey = process.env.VAPID_PRIVATE_KEY;
+const vapidMailto = process.env.VAPID_MAILTO || 'mailto:info@asacademy.site';
+
+if (vapidPublicKey && vapidPrivateKey) {
+    webpush.setVapidDetails(
+        vapidMailto,
+        vapidPublicKey,
+        vapidPrivateKey
+    );
+}
 
 class NotificationService {
     /**
@@ -26,6 +39,11 @@ class NotificationService {
             if (error) {
                 throw new AppError('Failed to create notification', 500);
             }
+
+            // Send push notification asynchronously in background
+            this.sendPushNotification(userId, title, message, data).catch(err => {
+                console.error('Push notification background send failed:', err);
+            });
 
             return { success: true };
         } catch (error) {
@@ -144,6 +162,16 @@ class NotificationService {
 
             await supabase.from('notifications').insert(notifications);
 
+            // Send push notifications asynchronously in background
+            enrollments.forEach(enrollment => {
+                this.sendPushNotification(
+                    enrollment.user_id,
+                    'Live Class Starting!',
+                    `${course.title} is going live now!`,
+                    { courseId, type: 'live_class' }
+                ).catch(err => console.error('Notify live class push failed:', err));
+            });
+
             return { success: true, notified: enrollments.length };
         } catch (error) {
             console.error('Notify Live Class Error:', error);
@@ -189,6 +217,16 @@ class NotificationService {
 
             await supabase.from('notifications').insert(notifications);
 
+            // Send push notifications asynchronously in background
+            enrollments.forEach(enrollment => {
+                this.sendPushNotification(
+                    enrollment.user_id,
+                    'New Content Added!',
+                    `New ${contentType} "${contentTitle}" added to ${course.title}`,
+                    { courseId, type: 'new_content', contentType, contentTitle }
+                ).catch(err => console.error('Notify new content push failed:', err));
+            });
+
             return { success: true, notified: enrollments.length };
         } catch (error) {
             console.error('Notify New Content Error:', error);
@@ -227,6 +265,67 @@ class NotificationService {
         }
 
         return count || 0;
+    }
+
+    /**
+     * Send push notification to all subscribed devices of a user
+     * @param {string} userId - User ID
+     * @param {string} title - Notification title
+     * @param {string} body - Notification body
+     * @param {object} data - Additional data payload
+     */
+    async sendPushNotification(userId, title, body, data = {}) {
+        try {
+            const vapidPublicKey = process.env.VAPID_PUBLIC_KEY;
+            const vapidPrivateKey = process.env.VAPID_PRIVATE_KEY;
+            
+            if (!vapidPublicKey || !vapidPrivateKey) {
+                console.warn('⚠️ Web Push not sent: VAPID keys not configured');
+                return;
+            }
+
+            // Fetch push subscriptions from DB for user
+            const { data: subscriptions, error } = await supabase
+                .from('push_subscriptions')
+                .select('*')
+                .eq('user_id', userId);
+
+            if (error || !subscriptions || subscriptions.length === 0) {
+                return; // No active subscriptions
+            }
+
+            const payload = JSON.stringify({
+                title,
+                body,
+                data
+            });
+
+            // Send notification to all subscriptions
+            await Promise.all(subscriptions.map(async (sub) => {
+                const pushSubscription = {
+                    endpoint: sub.endpoint,
+                    keys: {
+                        p256dh: sub.p256dh,
+                        auth: sub.auth
+                    }
+                };
+
+                try {
+                    await webpush.sendNotification(pushSubscription, payload);
+                } catch (err) {
+                    // If subscription has expired or is invalid (410 Gone / 404 Not Found), delete it from DB
+                    if (err.statusCode === 410 || err.statusCode === 404) {
+                        console.log('🗑️ Deleting expired push subscription endpoint:', sub.endpoint);
+                        await supabase
+                            .from('push_subscriptions')
+                            .delete()
+                            .eq('endpoint', sub.endpoint);
+                    }
+                }
+            }));
+        } catch (error) {
+            console.error('sendPushNotification error:', error);
+        }
     }
 }
 

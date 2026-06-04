@@ -26,6 +26,7 @@ import courseRequestRoutes from './src/routes/courseRequest.routes.js';
 import couponRoutes from './src/routes/coupon.routes.js';
 import seoRoutes from './src/routes/seo.routes.js';
 import topRankerRoutes from './src/routes/topRanker.routes.js';
+import pushRoutes from './src/routes/push.routes.js';
 
 const app = express();
 
@@ -116,6 +117,7 @@ app.use('/api/course-requests', courseRequestRoutes);
 app.use('/api/coupons', couponRoutes);
 app.use('/api/seo', seoRoutes);
 app.use('/api/top-rankers', topRankerRoutes);
+app.use('/api/push', pushRoutes);
 
 // 404 handler
 app.use('*', (req, res) => {
