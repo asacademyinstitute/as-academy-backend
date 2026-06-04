@@ -1,10 +1,11 @@
 import supabase from '../config/database.js';
 import { AppError } from '../middlewares/error.middleware.js';
 import webpush from 'web-push';
+import { config } from '../config/config.js';
 
-const vapidPublicKey = process.env.VAPID_PUBLIC_KEY;
-const vapidPrivateKey = process.env.VAPID_PRIVATE_KEY;
-const vapidMailto = process.env.VAPID_MAILTO || 'mailto:info@asacademy.site';
+const vapidPublicKey = config.vapid.publicKey;
+const vapidPrivateKey = config.vapid.privateKey;
+const vapidMailto = config.vapid.mailto;
 
 if (vapidPublicKey && vapidPrivateKey) {
     webpush.setVapidDetails(
@@ -276,8 +277,8 @@ class NotificationService {
      */
     async sendPushNotification(userId, title, body, data = {}) {
         try {
-            const vapidPublicKey = process.env.VAPID_PUBLIC_KEY;
-            const vapidPrivateKey = process.env.VAPID_PRIVATE_KEY;
+            const vapidPublicKey = config.vapid.publicKey;
+            const vapidPrivateKey = config.vapid.privateKey;
             
             if (!vapidPublicKey || !vapidPrivateKey) {
                 console.warn('⚠️ Web Push not sent: VAPID keys not configured');

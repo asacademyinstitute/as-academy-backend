@@ -19,6 +19,13 @@ export const config = {
         serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY,
     },
 
+    // Web Push (VAPID)
+    vapid: {
+        publicKey: process.env.VAPID_PUBLIC_KEY || 'BORL6gYzIhiENV-9swn6n5plyVncDh5B59iBiiCRlv8im74uobE2uIWSj3xurbBHA_DED04BqLLjh4qaq6fL2qQ',
+        privateKey: process.env.VAPID_PRIVATE_KEY || '33XxEqayxQA8c81ctFLGcrv7OEEZtRuqMqcVNUbzXnM',
+        mailto: process.env.VAPID_MAILTO || 'mailto:info@asacademy.site'
+    },
+
     // Razorpay
     razorpay: {
         keyId: process.env.RAZORPAY_KEY_ID,

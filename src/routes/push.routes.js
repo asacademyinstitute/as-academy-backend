@@ -2,12 +2,13 @@ import express from 'express';
 import { authenticate } from '../middlewares/auth.middleware.js';
 import { asyncHandler } from '../middlewares/error.middleware.js';
 import { supabase } from '../config/database.js';
+import { config } from '../config/config.js';
 
 const router = express.Router();
 
 // GET /api/push/vapid-public-key
 router.get('/vapid-public-key', asyncHandler(async (req, res) => {
-    const publicKey = process.env.VAPID_PUBLIC_KEY;
+    const publicKey = config.vapid.publicKey;
     if (!publicKey) {
         return res.status(500).json({
             success: false,
