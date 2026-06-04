@@ -439,6 +439,76 @@ class CourseService {
             copied_lectures: copiedLecturesCount
         };
     }
+
+    // Bulk update course status (admin only)
+    async bulkUpdateStatus(courseIds, status, userId) {
+        if (!['active', 'inactive'].includes(status)) {
+            throw new AppError('Invalid status value', 400);
+        }
+
+        const { data, error } = await supabase
+            .from('courses')
+            .update({ status })
+            .in('id', courseIds)
+            .select('id, title');
+
+        if (error) {
+            throw new AppError('Failed to bulk update course status', 500);
+        }
+
+        // Log action
+        const courseTitles = data.map(c => c.title).join(', ');
+        await auditService.log(
+            userId,
+            'COURSE_BULK_STATUS_UPDATED',
+            `Bulk set status to ${status} for courses: ${courseTitles}`
+        );
+
+        return data;
+    }
+
+    // Bulk delete courses (admin only)
+    async bulkDeleteCourses(courseIds, userId) {
+        const deletedCourses = [];
+        const failedCourses = [];
+
+        for (const courseId of courseIds) {
+            try {
+                // Fetch course info first for logging
+                const { data: course } = await supabase
+                    .from('courses')
+                    .select('title')
+                    .eq('id', courseId)
+                    .single();
+
+                await this.deleteCourse(courseId, userId);
+                deletedCourses.push(course ? course.title : courseId);
+            } catch (err) {
+                console.error(`Failed to delete course ${courseId}:`, err);
+                failedCourses.push(courseId);
+            }
+        }
+
+        if (failedCourses.length > 0 && deletedCourses.length === 0) {
+            throw new AppError('Failed to delete courses', 500);
+        }
+
+        // Log action
+        if (deletedCourses.length > 0) {
+            await auditService.log(
+                userId,
+                'COURSES_BULK_DELETED',
+                `Bulk deleted courses: ${deletedCourses.join(', ')}`
+            );
+        }
+
+        return {
+            success: true,
+            deletedCount: deletedCourses.length,
+            failedCount: failedCourses.length,
+            failedCourses
+        };
+    }
 }
 
 export default new CourseService();

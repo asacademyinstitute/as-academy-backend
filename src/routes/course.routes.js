@@ -105,4 +105,34 @@ router.post('/:id/transfer', authenticate, isAdmin, asyncHandler(async (req, res
     });
 }));
 
+// Bulk update status (admin only)
+router.post('/bulk-status', authenticate, isAdmin, asyncHandler(async (req, res) => {
+    const { courseIds, status } = req.body;
+    if (!courseIds || !Array.isArray(courseIds) || courseIds.length === 0) {
+        return res.status(400).json({ success: false, message: 'courseIds array is required' });
+    }
+
+    const result = await courseService.bulkUpdateStatus(courseIds, status, req.user.id);
+    res.json({
+        success: true,
+        message: `Successfully set status to ${status} for ${courseIds.length} courses`,
+        data: result
+    });
+}));
+
+// Bulk delete courses (admin only)
+router.post('/bulk-delete', authenticate, isAdmin, asyncHandler(async (req, res) => {
+    const { courseIds } = req.body;
+    if (!courseIds || !Array.isArray(courseIds) || courseIds.length === 0) {
+        return res.status(400).json({ success: false, message: 'courseIds array is required' });
+    }
+
+    const result = await courseService.bulkDeleteCourses(courseIds, req.user.id);
+    res.json({
+        success: true,
+        message: `Successfully deleted ${result.deletedCount} courses`,
+        data: result
+    });
+}));
+
 export default router;
