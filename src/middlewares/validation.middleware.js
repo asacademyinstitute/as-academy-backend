@@ -36,6 +36,9 @@ export const registerValidation = [
     body('semester')
         .optional()
         .trim(),
+    body('enrollment_number')
+        .optional()
+        .trim(),
     validate
 ];
 

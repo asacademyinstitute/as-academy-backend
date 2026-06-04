@@ -9,7 +9,7 @@ class UserService {
     async getUsers(filters = {}, page = 1, limit = 50) {
         let query = supabase
             .from('users')
-            .select('id, name, email, phone, college_name, semester, role, status, created_at', { count: 'exact' })
+            .select('id, name, email, phone, enrollment_number, college_name, semester, role, status, created_at', { count: 'exact' })
             .order('created_at', { ascending: false });
 
         // Apply filters
@@ -50,7 +50,7 @@ class UserService {
     async getUserById(userId) {
         const { data: user, error } = await supabase
             .from('users')
-            .select('id, name, email, phone, college_name, semester, role, status, created_at, updated_at')
+            .select('id, name, email, phone, enrollment_number, college_name, semester, role, status, created_at, updated_at')
             .eq('id', userId)
             .single();
 
@@ -63,7 +63,7 @@ class UserService {
 
     // Create user (admin only)
     async createUser(userData, adminId) {
-        const { name, email, phone, password, college_name, semester, role } = userData;
+        const { name, email, phone, password, enrollment_number, college_name, semester, role } = userData;
 
         // Check if user exists
         const { data: existingUser } = await supabase
@@ -87,12 +87,13 @@ class UserService {
                 email,
                 phone,
                 password_hash,
+                enrollment_number,
                 college_name,
                 semester,
                 role,
                 status: 'active'
             })
-            .select('id, name, email, phone, role, college_name, semester, created_at')
+            .select('id, name, email, phone, role, enrollment_number, college_name, semester, created_at')
             .single();
 
         if (error) {
@@ -111,7 +112,7 @@ class UserService {
 
     // Update user
     async updateUser(userId, updateData, adminId) {
-        const allowedFields = ['name', 'phone', 'college_name', 'semester', 'status'];
+        const allowedFields = ['name', 'phone', 'enrollment_number', 'college_name', 'semester', 'status'];
         const updates = {};
 
         for (const field of allowedFields) {
@@ -128,7 +129,7 @@ class UserService {
             .from('users')
             .update(updates)
             .eq('id', userId)
-            .select('id, name, email, phone, college_name, semester, role, status')
+            .select('id, name, email, phone, enrollment_number, college_name, semester, role, status')
             .single();
 
         if (error) {

@@ -9,7 +9,7 @@ import settingsService from './settings.service.js';
 class AuthService {
     // Register new user
     async register(userData) {
-        const { name, email, phone, password, college_name, semester, role = 'student', deviceId } = userData;
+        const { name, email, phone, password, enrollment_number, college_name, semester, role = 'student', deviceId } = userData;
 
         // Check if user already exists
         const { data: existingUser } = await supabase
@@ -33,12 +33,13 @@ class AuthService {
                 email,
                 phone,
                 password_hash,
+                enrollment_number,
                 college_name,
                 semester,
                 role,
                 status: 'active'
             })
-            .select('id, name, email, phone, role, college_name, semester, created_at')
+            .select('id, name, email, phone, role, enrollment_number, college_name, semester, created_at')
             .single();
 
         if (error) {
