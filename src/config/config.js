@@ -21,9 +21,9 @@ export const config = {
 
     // Web Push (VAPID)
     vapid: {
-        publicKey: process.env.VAPID_PUBLIC_KEY || 'BORL6gYzIhiENV-9swn6n5plyVncDh5B59iBiiCRlv8im74uobE2uIWSj3xurbBHA_DED04BqLLjh4qaq6fL2qQ',
-        privateKey: process.env.VAPID_PRIVATE_KEY || '33XxEqayxQA8c81ctFLGcrv7OEEZtRuqMqcVNUbzXnM',
-        mailto: process.env.VAPID_MAILTO || 'mailto:info@asacademy.site'
+        publicKey: (process.env.VAPID_PUBLIC_KEY || 'BORL6gYzIhiENV-9swn6n5plyVncDh5B59iBiiCRlv8im74uobE2uIWSj3xurbBHA_DED04BqLLjh4qaq6fL2qQ').replace(/['"]/g, '').trim(),
+        privateKey: (process.env.VAPID_PRIVATE_KEY || '33XxEqayxQA8c81ctFLGcrv7OEEZtRuqMqcVNUbzXnM').replace(/['"]/g, '').trim(),
+        mailto: (process.env.VAPID_MAILTO || 'mailto:info@asacademy.site').replace(/['"]/g, '').trim()
     },
 
     // Razorpay
