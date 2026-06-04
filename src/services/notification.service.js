@@ -8,11 +8,16 @@ const vapidPrivateKey = config.vapid.privateKey;
 const vapidMailto = config.vapid.mailto;
 
 if (vapidPublicKey && vapidPrivateKey) {
-    webpush.setVapidDetails(
-        vapidMailto,
-        vapidPublicKey,
-        vapidPrivateKey
-    );
+    try {
+        webpush.setVapidDetails(
+            vapidMailto,
+            vapidPublicKey,
+            vapidPrivateKey
+        );
+        console.log('✅ Web Push VAPID details configured successfully');
+    } catch (err) {
+        console.error('❌ Failed to configure Web Push VAPID details:', err.message);
+    }
 }
 
 class NotificationService {
