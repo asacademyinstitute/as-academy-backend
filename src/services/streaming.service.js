@@ -190,6 +190,22 @@ class StreamingService {
         const expectedSignature = this._generateSignature(lectureId, userId, expiresAt);
         return signature === expectedSignature && Date.now() < expiresAt;
     }
+
+    // Generate signed download URL (admin/teacher)
+    async generateDownloadUrl(lectureId) {
+        const { data: lecture, error } = await supabase
+            .from('lectures')
+            .select('file_url')
+            .eq('id', lectureId)
+            .single();
+
+        if (error || !lecture || !lecture.file_url) {
+            throw new AppError('Lecture file not found', 404);
+        }
+
+        const signedUrl = await this.getSignedUrl(lecture.file_url, 7200);
+        return { url: signedUrl };
+    }
 }
 
 export default new StreamingService();

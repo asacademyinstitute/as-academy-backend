@@ -73,4 +73,13 @@ router.get('/watermark', authenticate, asyncHandler(async (req, res) => {
     });
 }));
 
+// Get admin/teacher download URL for a lecture file (teacher or admin only)
+router.get('/download/:lectureId', authenticate, isTeacherOrAdmin, asyncHandler(async (req, res) => {
+    const result = await streamingService.generateDownloadUrl(req.params.lectureId);
+    res.json({
+        success: true,
+        data: result
+    });
+}));
+
 export default router;

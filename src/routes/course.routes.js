@@ -85,4 +85,24 @@ router.get('/teacher/:teacherId', authenticate, asyncHandler(async (req, res) =>
     });
 }));
 
+// Transfer course content (admin only)
+router.post('/:id/transfer', authenticate, isAdmin, asyncHandler(async (req, res) => {
+    const { targetCourseId } = req.body;
+
+    if (!targetCourseId) {
+        return res.status(400).json({
+            success: false,
+            message: 'Please provide targetCourseId'
+        });
+    }
+
+    const result = await courseService.transferCourseContent(req.params.id, targetCourseId, req.user.id);
+
+    res.json({
+        success: true,
+        message: result.message,
+        data: result
+    });
+}));
+
 export default router;

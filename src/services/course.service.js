@@ -323,6 +323,122 @@ class CourseService {
 
         return courses;
     }
+
+    // Transfer/Copy all course contents (chapters and lectures) from one course to another
+    async transferCourseContent(sourceCourseId, targetCourseId, userId) {
+        if (sourceCourseId === targetCourseId) {
+            throw new AppError('Source and target courses cannot be the same', 400);
+        }
+
+        // Verify target course exists
+        const { data: targetCourse, error: targetError } = await supabase
+            .from('courses')
+            .select('id, title')
+            .eq('id', targetCourseId)
+            .single();
+
+        if (targetError || !targetCourse) {
+            throw new AppError('Target course not found', 404);
+        }
+
+        // Get all chapters and lectures of source course
+        const { data: chapters, error: chaptersError } = await supabase
+            .from('chapters')
+            .select(`
+                *,
+                lectures (*)
+            `)
+            .eq('course_id', sourceCourseId)
+            .order('chapter_order', { ascending: true });
+
+        if (chaptersError) {
+            throw new AppError('Failed to fetch source course chapters', 500);
+        }
+
+        if (!chapters || chapters.length === 0) {
+            return {
+                success: true,
+                message: 'Source course has no chapters to transfer',
+                copied_chapters: 0,
+                copied_lectures: 0
+            };
+        }
+
+        // Get max chapter_order of target course
+        const { data: existingChapters } = await supabase
+            .from('chapters')
+            .select('chapter_order')
+            .eq('course_id', targetCourseId)
+            .order('chapter_order', { ascending: false })
+            .limit(1);
+
+        let baseOrder = 0;
+        if (existingChapters && existingChapters.length > 0) {
+            baseOrder = existingChapters[0].chapter_order;
+        }
+
+        let copiedChaptersCount = 0;
+        let copiedLecturesCount = 0;
+
+        // Loop through each chapter and copy it
+        for (const chapter of chapters) {
+            const newChapterOrder = baseOrder + chapter.chapter_order;
+
+            const { data: newChapter, error: newChapterError } = await supabase
+                .from('chapters')
+                .insert({
+                    course_id: targetCourseId,
+                    title: chapter.title,
+                    chapter_order: newChapterOrder
+                })
+                .select()
+                .single();
+
+            if (newChapterError) {
+                console.error(`Failed to copy chapter "${chapter.title}":`, newChapterError);
+                throw new AppError(`Failed to transfer chapter: ${newChapterError.message}`, 500);
+            }
+
+            copiedChaptersCount++;
+
+            // If there are lectures, copy them in bulk
+            if (chapter.lectures && chapter.lectures.length > 0) {
+                const lecturesToInsert = chapter.lectures.map(lecture => ({
+                    chapter_id: newChapter.id,
+                    title: lecture.title,
+                    type: lecture.type,
+                    file_url: lecture.file_url,
+                    duration: lecture.duration,
+                    lecture_order: lecture.lecture_order
+                }));
+
+                const { error: newLecturesError } = await supabase
+                    .from('lectures')
+                    .insert(lecturesToInsert);
+
+                if (newLecturesError) {
+                    console.error(`Failed to copy lectures for chapter "${chapter.title}":`, newLecturesError);
+                    throw new AppError(`Failed to transfer lectures: ${newLecturesError.message}`, 500);
+                }
+
+                copiedLecturesCount += lecturesToInsert.length;
+            }
+        }
+
+        // Log action
+        await auditService.log(
+            userId,
+            'COURSE_CONTENT_TRANSFERRED',
+            `Transferred content from course ${sourceCourseId} to course ${targetCourse.title} (${targetCourseId})`
+        );
+
+        return {
+            success: true,
+            message: `Successfully transferred ${copiedChaptersCount} chapters and ${copiedLecturesCount} lectures to ${targetCourse.title}`,
+            copied_chapters: copiedChaptersCount,
+            copied_lectures: copiedLecturesCount
+        };
+    }
 }
 
 export default new CourseService();
