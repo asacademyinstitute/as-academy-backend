@@ -61,7 +61,7 @@ class EnrollmentService {
     }
 
     // Admin enroll student (admin only)
-    async adminEnrollStudent(studentId, courseId, validityDays, adminId) {
+    async adminEnrollStudent(studentId, courseId, validityDays, adminId, amount = 0) {
         // Check if already enrolled
         const { data: existing } = await supabase
             .from('enrollments')
@@ -101,12 +101,32 @@ class EnrollmentService {
         const validUntil = new Date();
         validUntil.setDate(validUntil.getDate() + validityDays);
 
-        // Create enrollment
+        // Create an offline payment record so the amount is stored
+        const paidAmount = parseFloat(amount) || 0;
+        const { data: payment, error: paymentError } = await supabase
+            .from('payments')
+            .insert({
+                student_id: studentId,
+                course_id: courseId,
+                amount: paidAmount,
+                status: 'success',
+                payment_method: 'offline',
+                paid_at: new Date().toISOString(),
+            })
+            .select()
+            .single();
+
+        if (paymentError) {
+            throw new AppError('Failed to create payment record', 500);
+        }
+
+        // Create enrollment linked to payment record
         const { data: enrollment, error } = await supabase
             .from('enrollments')
             .insert({
                 student_id: studentId,
                 course_id: courseId,
+                payment_id: payment.id,
                 valid_until: validUntil.toISOString(),
                 payment_type: 'offline',
                 status: 'active'
@@ -122,8 +142,8 @@ class EnrollmentService {
         await auditService.log(
             adminId,
             'ADMIN_STUDENT_ENROLLED',
-            `Admin enrolled ${student.name} in course: ${course.title}`,
-            { studentId, courseId, validityDays, paymentType: 'offline' }
+            `Admin enrolled ${student.name} in course: ${course.title} (Amount: ${paidAmount})`,
+            { studentId, courseId, validityDays, paymentType: 'offline', amount: paidAmount }
         );
 
         return enrollment;

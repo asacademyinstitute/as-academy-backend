@@ -38,7 +38,7 @@ router.get('/check/:courseId', authenticate, isStudent, asyncHandler(async (req,
 
 // Admin enroll student (admin only)
 router.post('/admin-enroll', authenticate, isAdmin, asyncHandler(async (req, res) => {
-    const { student_id, course_id, validity_days } = req.body;
+    const { student_id, course_id, validity_days, amount } = req.body;
 
     // Validate required fields
     if (!student_id || !course_id || !validity_days) {
@@ -60,7 +60,8 @@ router.post('/admin-enroll', authenticate, isAdmin, asyncHandler(async (req, res
         student_id,
         course_id,
         parseInt(validity_days),
-        req.user.id
+        req.user.id,
+        amount ?? 0
     );
 
     res.status(201).json({

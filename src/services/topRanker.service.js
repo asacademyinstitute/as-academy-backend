@@ -14,7 +14,20 @@ class TopRankerService {
             throw new AppError('Failed to fetch top rankers', 500);
         }
 
-        return rankers || [];
+        // Generate signed URLs for all rankers photos if they exist
+        const updatedRankers = await Promise.all((rankers || []).map(async (ranker) => {
+            if (ranker.photo_url) {
+                try {
+                    const signedUrl = await streamingService.getSignedUrl(ranker.photo_url, 86400); // 24 hours validity
+                    return { ...ranker, photo_url: signedUrl };
+                } catch (err) {
+                    console.error(`Failed to sign photo URL for ranker ${ranker.id}:`, err);
+                }
+            }
+            return ranker;
+        }));
+
+        return updatedRankers;
     }
 
     // Get active top rankers (public)
@@ -29,7 +42,20 @@ class TopRankerService {
             throw new AppError('Failed to fetch active top rankers', 500);
         }
 
-        return rankers || [];
+        // Generate signed URLs for all rankers photos if they exist
+        const updatedRankers = await Promise.all((rankers || []).map(async (ranker) => {
+            if (ranker.photo_url) {
+                try {
+                    const signedUrl = await streamingService.getSignedUrl(ranker.photo_url, 86400); // 24 hours validity
+                    return { ...ranker, photo_url: signedUrl };
+                } catch (err) {
+                    console.error(`Failed to sign photo URL for active ranker ${ranker.id}:`, err);
+                }
+            }
+            return ranker;
+        }));
+
+        return updatedRankers;
     }
 
     // Create new top ranker

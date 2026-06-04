@@ -172,8 +172,8 @@ router.get('/analytics/by-course', authenticate, isAdmin, async (req, res, next)
  */
 router.get('/filtered', authenticate, isAdmin, async (req, res, next) => {
     try {
-        const { month, courseId, paymentMethod, status, page = 1, limit = 50 } = req.query;
-        const filters = { month, courseId, paymentMethod, status };
+        const { month, startDate, endDate, courseId, paymentMethod, status, page = 1, limit = 50 } = req.query;
+        const filters = { month, startDate, endDate, courseId, paymentMethod, status };
         const result = await paymentService.getFilteredPayments(filters, parseInt(page), parseInt(limit));
         res.status(200).json({
             success: true,

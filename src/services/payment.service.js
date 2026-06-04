@@ -478,6 +478,17 @@ class PaymentService {
             const startDate = new Date(year, month - 1, 1).toISOString();
             const endDate = new Date(year, month, 0, 23, 59, 59).toISOString();
             query = query.gte('created_at', startDate).lte('created_at', endDate);
+        } else if (filters.startDate && filters.endDate) {
+            // Custom date range
+            const start = new Date(filters.startDate);
+            start.setHours(0, 0, 0, 0);
+            const end = new Date(filters.endDate);
+            end.setHours(23, 59, 59, 999);
+            query = query.gte('created_at', start.toISOString()).lte('created_at', end.toISOString());
+        } else if (filters.startDate) {
+            const start = new Date(filters.startDate);
+            start.setHours(0, 0, 0, 0);
+            query = query.gte('created_at', start.toISOString());
         }
 
         if (filters.courseId) {
@@ -501,8 +512,23 @@ class PaymentService {
             throw new AppError('Failed to fetch filtered payments', 500);
         }
 
+        // Calculate summary for filtered results
+        let filteredRevenue = 0;
+        let filteredCount = 0;
+        payments?.forEach(p => {
+            if (p.status === 'success') {
+                filteredRevenue += parseFloat(p.amount) || 0;
+                filteredCount++;
+            }
+        });
+
         return {
             payments,
+            summary: {
+                totalAmount: filteredRevenue,
+                successCount: filteredCount,
+                totalCount: count
+            },
             pagination: {
                 page,
                 limit,
