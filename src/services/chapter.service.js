@@ -100,16 +100,53 @@ class ChapterService {
 
     // Delete chapter
     async deleteChapter(chapterId) {
-        const { error } = await supabase
-            .from('chapters')
-            .delete()
-            .eq('id', chapterId);
+        try {
+            // Get all lectures for this chapter to find their file_urls
+            const { data: lectures, error: fetchError } = await supabase
+                .from('lectures')
+                .select('id, file_url')
+                .eq('chapter_id', chapterId);
 
-        if (error) {
-            throw new AppError('Failed to delete chapter', 500);
+            if (fetchError) {
+                console.error('Error fetching lectures for chapter deletion:', fetchError);
+            }
+
+            // Delete files from B2 storage
+            if (lectures && lectures.length > 0) {
+                const streamingService = (await import('./streaming.service.js')).default;
+                for (const lecture of lectures) {
+                    if (lecture.file_url) {
+                        console.log(`🗑️ Deleting lecture file from B2 for chapter delete:`, lecture.file_url);
+                        await streamingService.deleteFile(lecture.file_url);
+                    }
+                }
+
+                // Delete lectures from database
+                const { error: lectureDeleteError } = await supabase
+                    .from('lectures')
+                    .delete()
+                    .eq('chapter_id', chapterId);
+
+                if (lectureDeleteError) {
+                    console.error('Error deleting chapter lectures:', lectureDeleteError);
+                }
+            }
+
+            // Finally delete chapter
+            const { error } = await supabase
+                .from('chapters')
+                .delete()
+                .eq('id', chapterId);
+
+            if (error) {
+                throw new AppError(`Failed to delete chapter: ${error.message}`, 500);
+            }
+
+            return { success: true, message: 'Chapter and all related lectures/files deleted successfully' };
+        } catch (error) {
+            console.error('Delete chapter error:', error);
+            throw error;
         }
-
-        return { success: true, message: 'Chapter deleted successfully' };
     }
 
     // Reorder chapters
