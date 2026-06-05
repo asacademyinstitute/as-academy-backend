@@ -141,6 +141,23 @@ router.get('/sitemap', asyncHandler(async (req, res) => {
 
 // ==================== ADMIN ROUTES ====================
 
+// Get single page by ID (admin only)
+router.get('/pages/:id', authenticate, isAdmin, asyncHandler(async (req, res) => {
+    const page = await seoService.getPageById(req.params.id);
+
+    if (!page) {
+        return res.status(404).json({
+            success: false,
+            message: 'Page not found'
+        });
+    }
+
+    res.json({
+        success: true,
+        data: page
+    });
+}));
+
 // Create new page (admin only)
 router.post('/pages', authenticate, isAdmin, asyncHandler(async (req, res) => {
     const page = await seoService.createPage(req.body, req.user.id);

@@ -51,6 +51,26 @@ class SeoService {
 
     // ==================== PAGES ====================
 
+    async getPageById(id) {
+        const { data, error } = await supabase
+            .from('seo_pages')
+            .select(`
+                *,
+                category:seo_categories(*),
+                subject:seo_subjects(*)
+            `)
+            .eq('id', id)
+            .single();
+
+        if (error) {
+            if (error.code === 'PGRST116') {
+                return null; // Not found
+            }
+            throw error;
+        }
+        return data;
+    }
+
     async getPageBySlug(slug) {
         const { data, error } = await supabase
             .from('seo_pages')
