@@ -42,7 +42,20 @@ class LectureService {
 
     // Create lecture
     async createLecture(lectureData) {
-        const { chapter_id, title, type, file_url, duration, lecture_order } = lectureData;
+        const { chapter_id, title, type, file_url, duration } = lectureData;
+
+        // Always auto-calculate the next safe lecture_order from the DB
+        // This prevents unique constraint collisions when client count is stale (e.g., after deletions)
+        const { data: existing, error: orderError } = await supabase
+            .from('lectures')
+            .select('lecture_order')
+            .eq('chapter_id', chapter_id)
+            .order('lecture_order', { ascending: false })
+            .limit(1);
+
+        const nextOrder = (existing && existing.length > 0)
+            ? existing[0].lecture_order + 1
+            : 1;
 
         const { data: lecture, error } = await supabase
             .from('lectures')
@@ -52,14 +65,14 @@ class LectureService {
                 type,
                 file_url,
                 duration,
-                lecture_order
+                lecture_order: nextOrder
             })
             .select()
             .single();
 
         if (error) {
             if (error.code === '23505') {
-                throw new AppError('Lecture order already exists for this chapter', 400);
+                throw new AppError('Lecture order conflict. Please try again.', 400);
             }
             throw new AppError('Failed to create lecture', 500);
         }

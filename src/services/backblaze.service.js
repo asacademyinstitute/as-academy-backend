@@ -21,16 +21,21 @@ class BackblazeService {
             if (!this.bucketName) {
                 this.bucketName = process.env.B2_BUCKET_NAME;
             }
+            // Always prefer env var for bucket ID (fastest, most reliable)
             if (!this.bucketId) {
-                this.bucketId = process.env.B2_BUCKET_ID;
+                this.bucketId = process.env.B2_BUCKET_ID || null;
             }
 
             if (!this.b2) {
                 const keyId = process.env.B2_KEY_ID || process.env.B2_APPLICATION_KEY_ID;
                 const appKey = process.env.B2_APPLICATION_KEY;
-                
+
+                if (!keyId || !appKey) {
+                    throw new AppError('B2_APPLICATION_KEY_ID and B2_APPLICATION_KEY must be set in environment variables', 500);
+                }
+
                 console.log(`🔌 Initializing Backblaze B2 client lazily with keyId: ${keyId}`);
-                
+
                 this.b2 = new B2({
                     applicationKeyId: keyId,
                     applicationKey: appKey,
@@ -41,12 +46,17 @@ class BackblazeService {
             this.authToken = response.data.authorizationToken;
             this.downloadUrl = response.data.downloadUrl;
 
-            // Resolve bucketId dynamically
+            // Resolve bucketId: env var → allowed scope → listBuckets (last resort)
             if (!this.bucketId) {
+                // 1. Try allowed scope from auth response (works for bucket-scoped keys)
                 if (response.data.allowed && response.data.allowed.bucketId) {
                     this.bucketId = response.data.allowed.bucketId;
+                    if (!this.bucketName && response.data.allowed.bucketName) {
+                        this.bucketName = response.data.allowed.bucketName;
+                    }
                     console.log('🎯 Resolved B2 Bucket ID from allowed scope:', this.bucketId);
                 } else if (this.bucketName) {
+                    // 2. Try listing buckets (only works for master/unrestricted keys)
                     try {
                         console.log('🔍 B2_BUCKET_ID not provided. Resolving dynamically from bucketName:', this.bucketName);
                         const bucketsRes = await this.b2.listBuckets();
@@ -61,11 +71,20 @@ class BackblazeService {
                         console.error('⚠️ Failed to list buckets (application key may be scoped to a single bucket):', listErr.message);
                     }
                 }
+
+                // If still no bucketId, fail fast with a clear error
+                if (!this.bucketId) {
+                    throw new AppError(
+                        'B2 Bucket ID could not be resolved. Please set B2_BUCKET_ID in your environment variables.',
+                        500
+                    );
+                }
             }
 
             return response.data;
         } catch (error) {
-            console.error('B2 Authorization Error:', error);
+            if (error instanceof AppError) throw error;
+            console.error('B2 Authorization Error:', error.message || error);
             throw new AppError('Failed to authorize with Backblaze B2', 500);
         }
     }
