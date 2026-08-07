@@ -177,8 +177,12 @@ class AuthService {
             }
 
             // Generate new access token
+            const payload = { userId: decoded.userId, role: decoded.role };
+            if (decoded.role === 'student' && tokenRecord.device_id) {
+                payload.deviceId = tokenRecord.device_id;
+            }
             const accessToken = jwt.sign(
-                { userId: decoded.userId, role: decoded.role },
+                payload,
                 config.jwtSecret,
                 { expiresIn: config.jwtExpiresIn }
             );
@@ -209,6 +213,12 @@ class AuthService {
 
     // Check device limit for students - use global device limit setting
     async checkDeviceLimit(userId, currentDeviceId) {
+        // Check if device tracking is globally enabled
+        const trackingEnabled = await settingsService.getSetting('device_tracking_enabled').catch(() => ({ setting_value: 'true' }));
+        if (trackingEnabled.setting_value !== 'true') {
+            return;
+        }
+
         // Get global device limit for all students
         const deviceLimit = await settingsService.getStudentDeviceLimit();
 
@@ -233,7 +243,7 @@ class AuthService {
         // New device - check if global limit reached
         if (devices.length >= deviceLimit) {
             throw new AppError(
-                'Your account has reached the maximum allowed devices. Contact admin.',
+                'Your device is not registered. This account is linked to another device. Please contact your admin or teacher to reset your device link.',
                 403
             );
         }

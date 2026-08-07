@@ -178,7 +178,52 @@ class CourseService {
     // Delete course (with cascade delete of chapters, lectures, enrollments, and B2 files)
     async deleteCourse(courseId, userId) {
         try {
-            // Step 1: Delete all enrollments for this course
+            // Get course to get thumbnail_url
+            const { data: course } = await supabase
+                .from('courses')
+                .select('thumbnail_url')
+                .eq('id', courseId)
+                .single();
+
+            // Step 1: Delete all coupon usage logs referencing payments for this course
+            const { data: payments } = await supabase
+                .from('payments')
+                .select('id')
+                .eq('course_id', courseId);
+
+            if (payments && payments.length > 0) {
+                const paymentIds = payments.map(p => p.id);
+                const { error: couponUsageError } = await supabase
+                    .from('coupon_usage')
+                    .delete()
+                    .in('payment_id', paymentIds);
+
+                if (couponUsageError) {
+                    console.error('Error deleting coupon usage logs:', couponUsageError);
+                }
+            }
+
+            // Step 2: Delete all payments for this course
+            const { error: paymentError } = await supabase
+                .from('payments')
+                .delete()
+                .eq('course_id', courseId);
+
+            if (paymentError) {
+                console.error('Error deleting payments:', paymentError);
+            }
+
+            // Step 3: Delete all certificates for this course
+            const { error: certificateError } = await supabase
+                .from('certificates')
+                .delete()
+                .eq('course_id', courseId);
+
+            if (certificateError) {
+                console.error('Error deleting certificates:', certificateError);
+            }
+
+            // Step 4: Delete all enrollments for this course
             const { error: enrollmentError } = await supabase
                 .from('enrollments')
                 .delete()
@@ -188,13 +233,53 @@ class CourseService {
                 console.error('Error deleting enrollments:', enrollmentError);
             }
 
-            // Step 2: Get all chapters for this course
+            // Step 5: Get quizzes for this course and delete questions & attempts
+            const { data: quizzes } = await supabase
+                .from('quizzes')
+                .select('id')
+                .eq('course_id', courseId);
+
+            if (quizzes && quizzes.length > 0) {
+                const quizIds = quizzes.map(q => q.id);
+
+                // Delete quiz attempts
+                const { error: quizAttemptsError } = await supabase
+                    .from('quiz_attempts')
+                    .delete()
+                    .in('quiz_id', quizIds);
+
+                if (quizAttemptsError) {
+                    console.error('Error deleting quiz attempts:', quizAttemptsError);
+                }
+
+                // Delete quiz questions
+                const { error: quizQuestionsError } = await supabase
+                    .from('quiz_questions')
+                    .delete()
+                    .in('quiz_id', quizIds);
+
+                if (quizQuestionsError) {
+                    console.error('Error deleting quiz questions:', quizQuestionsError);
+                }
+
+                // Delete quizzes
+                const { error: quizzesError } = await supabase
+                    .from('quizzes')
+                    .delete()
+                    .eq('course_id', courseId);
+
+                if (quizzesError) {
+                    console.error('Error deleting quizzes:', quizzesError);
+                }
+            }
+
+            // Step 6: Get all chapters for this course
             const { data: chapters } = await supabase
                 .from('chapters')
                 .select('id')
                 .eq('course_id', courseId);
 
-            // Step 3: Get all lectures and delete their files from B2
+            // Step 7: Get all lectures, delete their progress & files from B2
             if (chapters && chapters.length > 0) {
                 const chapterIds = chapters.map(ch => ch.id);
 
@@ -204,14 +289,28 @@ class CourseService {
                     .select('id, file_url')
                     .in('chapter_id', chapterIds);
 
-                // Delete files from B2 storage
                 if (lectures && lectures.length > 0) {
+                    const lectureIds = lectures.map(l => l.id);
+
+                    // Delete lecture progress
+                    const { error: progressError } = await supabase
+                        .from('lecture_progress')
+                        .delete()
+                        .in('lecture_id', lectureIds);
+
+                    if (progressError) {
+                        console.error('Error deleting lecture progress:', progressError);
+                    }
+
+                    // Delete files from B2 storage
                     console.log(`🗑️ Deleting ${lectures.length} lecture files from B2 storage...`);
                     const streamingService = (await import('./streaming.service.js')).default;
 
                     for (const lecture of lectures) {
                         if (lecture.file_url) {
-                            await streamingService.deleteFile(lecture.file_url);
+                            await streamingService.deleteFile(lecture.file_url).catch(err => {
+                                console.error(`Failed to delete B2 file: ${lecture.file_url}`, err);
+                            });
                         }
                     }
                 }
@@ -227,7 +326,7 @@ class CourseService {
                 }
             }
 
-            // Step 4: Delete all chapters
+            // Step 8: Delete all chapters
             const { error: chapterError } = await supabase
                 .from('chapters')
                 .delete()
@@ -237,7 +336,7 @@ class CourseService {
                 console.error('Error deleting chapters:', chapterError);
             }
 
-            // Step 5: Finally delete the course
+            // Step 9: Finally delete the course
             const { error: courseError } = await supabase
                 .from('courses')
                 .delete()
@@ -248,14 +347,28 @@ class CourseService {
                 throw new AppError(`Failed to delete course: ${courseError.message}`, 500);
             }
 
+            // Step 10: Delete thumbnail from Supabase Storage if it exists
+            if (course && course.thumbnail_url) {
+                try {
+                    const urlParts = course.thumbnail_url.split('/course-thumbnails/');
+                    if (urlParts.length > 1) {
+                        const fileName = urlParts[1];
+                        console.log(`🗑️ Deleting thumbnail from storage: ${fileName}`);
+                        await supabase.storage.from('course-thumbnails').remove([fileName]);
+                    }
+                } catch (thumbError) {
+                    console.error('Error deleting course thumbnail from storage:', thumbError);
+                }
+            }
+
             // Log action
             await auditService.log(
                 userId,
                 'COURSE_DELETED',
-                `Deleted course with ID: ${courseId} (including all chapters, lectures, enrollments, and B2 files)`
+                `Deleted course with ID: ${courseId} (including all chapters, lectures, progress, quizzes, payments, enrollments, certificates, and storage files)`
             );
 
-            return { success: true, message: 'Course and all related data (including B2 files) deleted successfully' };
+            return { success: true, message: 'Course and all related data deleted successfully' };
         } catch (error) {
             console.error('Delete course error:', error);
             throw error;

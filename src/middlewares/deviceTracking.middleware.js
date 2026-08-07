@@ -3,13 +3,16 @@ import crypto from 'crypto';
 
 // Generate a device fingerprint from request (excluding dynamic IP address to prevent lockouts on network shifts)
 export const generateDeviceId = (req) => {
-    const userAgent = req.headers['user-agent'] || '';
-    const deviceIdHeader = req.headers['x-device-id'] || '';
+    const deviceIdHeader = req.headers['x-device-id'];
+    if (deviceIdHeader) {
+        return deviceIdHeader;
+    }
 
-    // Create a stable hash from user agent and persistent header
+    // Fallback: stable hash from user agent
+    const userAgent = req.headers['user-agent'] || '';
     const hash = crypto
         .createHash('sha256')
-        .update(userAgent + deviceIdHeader)
+        .update(userAgent)
         .digest('hex');
 
     return hash;

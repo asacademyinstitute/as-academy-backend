@@ -31,23 +31,29 @@ class PaymentService {
             }
 
             // Check if already enrolled
-            const { data: existingEnrollment } = await supabase
+            const { data: existingEnrollment, error: existingError } = await supabase
                 .from('enrollments')
-                .select('*')
+                .select('id')
                 .eq('student_id', userId)
                 .eq('course_id', courseId)
                 .eq('status', 'active')
-                .single();
+                .maybeSingle(); // maybeSingle() returns null if not found (single() throws error)
 
             if (existingEnrollment) {
                 throw new AppError('Already enrolled in this course', 400);
             }
 
             // Create Razorpay order
+            // NOTE: receipt must be <= 40 chars (Razorpay limit)
+            // Use short IDs: first 8 chars of courseId + userId + timestamp mod
+            const shortCourse = courseId.replace(/-/g, '').substring(0, 8);
+            const shortUser = userId.replace(/-/g, '').substring(0, 8);
+            const shortTs = Date.now().toString().slice(-8);
+            const receipt = `c${shortCourse}u${shortUser}t${shortTs}`; // ~27 chars
             const order = await this.razorpay.orders.create({
                 amount: amount * 100, // Convert to paise
                 currency: 'INR',
-                receipt: `course_${courseId}_user_${userId}_${Date.now()}`,
+                receipt,
                 notes: {
                     courseId,
                     userId,
@@ -55,22 +61,23 @@ class PaymentService {
                 },
             });
 
-            // Save order to database
             const { data: payment, error: paymentError } = await supabase
                 .from('payments')
                 .insert({
                     student_id: userId,
                     course_id: courseId,
-                    order_id: order.id,
+                    razorpay_order_id: order.id,
                     amount: amount,
                     currency: 'INR',
-                    status: 'created',
+                    status: 'pending',
+                    payment_method: 'online',
                 })
                 .select()
                 .single();
 
             if (paymentError) {
-                throw new AppError('Failed to save payment record', 500);
+                console.error('Payment insert error details:', JSON.stringify(paymentError));
+                throw new AppError(`Failed to save payment record: ${paymentError.message}`, 500);
             }
 
             return {
@@ -126,7 +133,7 @@ class PaymentService {
             const { data: payment, error: paymentError } = await supabase
                 .from('payments')
                 .select('*')
-                .eq('order_id', orderId)
+                .eq('razorpay_order_id', orderId)
                 .single();
 
             if (paymentError || !payment) {
@@ -137,10 +144,9 @@ class PaymentService {
             await supabase
                 .from('payments')
                 .update({
-                    payment_id: paymentId,
-                    signature: signature,
+                    razorpay_payment_id: paymentId,
+                    razorpay_signature: signature,
                     status: 'success',
-                    paid_at: new Date().toISOString(),
                 })
                 .eq('id', payment.id);
 
@@ -161,7 +167,7 @@ class PaymentService {
                 .insert({
                     student_id: payment.student_id,
                     course_id: payment.course_id,
-                    payment_id: payment.id,
+                    payment_type: 'online',
                     status: 'active',
                     valid_until: validUntil.toISOString(),
                 })
@@ -543,6 +549,19 @@ class PaymentService {
      */
     async offlineEnrollment(studentId, courseId, amount, adminId) {
         try {
+            // Check if student is already enrolled in this course
+            const { data: existingEnrollment } = await supabase
+                .from('enrollments')
+                .select('id')
+                .eq('student_id', studentId)
+                .eq('course_id', courseId)
+                .eq('status', 'active')
+                .maybeSingle();
+
+            if (existingEnrollment) {
+                throw new AppError('Student is already enrolled in this course', 400);
+            }
+
             // Get course validity
             const { data: course, error: courseError } = await supabase
                 .from('courses')
@@ -567,13 +586,13 @@ class PaymentService {
                     amount: amount,
                     status: 'success',
                     payment_method: 'offline',
-                    paid_at: new Date().toISOString(),
                 })
                 .select()
                 .single();
 
             if (paymentError) {
-                throw new AppError('Failed to create offline payment record', 500);
+                console.error('Offline payment insert error:', JSON.stringify(paymentError));
+                throw new AppError(`Failed to create offline payment record: ${paymentError.message}`, 500);
             }
 
             // Create enrollment record
@@ -582,7 +601,7 @@ class PaymentService {
                 .insert({
                     student_id: studentId,
                     course_id: courseId,
-                    payment_id: payment.id,
+                    payment_type: 'offline',
                     status: 'active',
                     valid_until: validUntil.toISOString(),
                 })
@@ -590,7 +609,8 @@ class PaymentService {
                 .single();
 
             if (enrollError) {
-                throw new AppError('Failed to create enrollment', 500);
+                console.error('Offline enrollment insert error:', JSON.stringify(enrollError));
+                throw new AppError(`Failed to create enrollment: ${enrollError.message}`, 500);
             }
 
             return {

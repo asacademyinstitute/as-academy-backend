@@ -8,10 +8,10 @@ class EnrollmentService {
         // Check if already enrolled
         const { data: existing } = await supabase
             .from('enrollments')
-            .select('*')
+            .select('id')
             .eq('student_id', studentId)
             .eq('course_id', courseId)
-            .single();
+            .maybeSingle(); // maybeSingle() returns null if not found
 
         if (existing) {
             throw new AppError('Student is already enrolled in this course', 400);
@@ -65,10 +65,10 @@ class EnrollmentService {
         // Check if already enrolled
         const { data: existing } = await supabase
             .from('enrollments')
-            .select('*')
+            .select('id')
             .eq('student_id', studentId)
             .eq('course_id', courseId)
-            .single();
+            .maybeSingle(); // maybeSingle() returns null if not found
 
         if (existing) {
             throw new AppError('Student is already enrolled in this course', 400);
@@ -111,13 +111,13 @@ class EnrollmentService {
                 amount: paidAmount,
                 status: 'success',
                 payment_method: 'offline',
-                paid_at: new Date().toISOString(),
             })
             .select()
             .single();
 
         if (paymentError) {
-            throw new AppError('Failed to create payment record', 500);
+            console.error('Payment insert error (adminEnroll):', JSON.stringify(paymentError));
+            throw new AppError(`Failed to create payment record: ${paymentError.message}`, 500);
         }
 
         // Create enrollment linked to payment record
@@ -126,7 +126,6 @@ class EnrollmentService {
             .insert({
                 student_id: studentId,
                 course_id: courseId,
-                payment_id: payment.id,
                 valid_until: validUntil.toISOString(),
                 payment_type: 'offline',
                 status: 'active'
@@ -135,7 +134,8 @@ class EnrollmentService {
             .single();
 
         if (error) {
-            throw new AppError('Failed to enroll student', 500);
+            console.error('Enrollment insert error (adminEnroll):', JSON.stringify(error));
+            throw new AppError(`Failed to enroll student: ${error.message}`, 500);
         }
 
         // Log action
@@ -418,7 +418,8 @@ class EnrollmentService {
         return {
             totalLectures,
             completedLectures,
-            progressPercentage
+            progressPercentage,
+            completedLectureIds: progress ? progress.map(p => p.lecture_id) : []
         };
     }
 }

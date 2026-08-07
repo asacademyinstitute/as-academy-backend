@@ -78,7 +78,9 @@ export const authenticate = async (req, res, next) => {
                 // If token has device ID but request header doesn't
                 if (!requestDeviceId) {
                     console.error(`🚫 Device validation failed for student ${user.id}: No device ID in header`);
-                    throw new AppError('Session invalidated due to device reset or device change', 403);
+                    const error = new AppError('Session invalidated due to device reset or device change', 403);
+                    error.code = 'DEVICE_SESSION_INVALID';
+                    throw error;
                 }
 
                 // If device IDs don't match
@@ -91,7 +93,9 @@ export const authenticate = async (req, res, next) => {
                         .update({ revoked: true })
                         .eq('user_id', user.id);
 
-                    throw new AppError('Session invalidated due to device reset or device change', 403);
+                    const error = new AppError('Session invalidated due to device reset or device change', 403);
+                    error.code = 'DEVICE_SESSION_INVALID';
+                    throw error;
                 }
             }
         }

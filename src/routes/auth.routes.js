@@ -9,7 +9,8 @@ const router = Router();
 
 // Register
 router.post('/register', registerValidation, asyncHandler(async (req, res) => {
-    const result = await authService.register(req.body);
+    const deviceId = req.body.deviceId || generateDeviceId(req);
+    const result = await authService.register({ ...req.body, deviceId });
     res.status(201).json({
         success: true,
         message: 'Registration successful',
@@ -19,10 +20,10 @@ router.post('/register', registerValidation, asyncHandler(async (req, res) => {
 
 // Login
 router.post('/login', loginValidation, asyncHandler(async (req, res) => {
-    const { email, password } = req.body;
-    const deviceId = generateDeviceId(req);
+    const { email, password, deviceId } = req.body;
+    const finalDeviceId = deviceId || generateDeviceId(req);
 
-    const result = await authService.login(email, password, deviceId);
+    const result = await authService.login(email, password, finalDeviceId);
 
     res.json({
         success: true,

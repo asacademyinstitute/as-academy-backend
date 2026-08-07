@@ -230,8 +230,7 @@ class SeoService {
     async getAnalytics(filters = {}) {
         let query = supabase
             .from('seo_pages')
-            .select('id, title, url_slug, page_type, view_count, download_count, published_at')
-            .eq('is_published', true);
+            .select('id, title, url_slug, page_type, view_count, download_count, published_at, is_published');
 
         if (filters.category_id) {
             query = query.eq('category_id', filters.category_id);
