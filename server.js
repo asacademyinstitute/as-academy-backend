@@ -2,11 +2,9 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
-import compression from 'compression';
 import { config } from './src/config/config.js';
 import { errorHandler } from './src/middlewares/error.middleware.js';
 
-// Import routes
 import authRoutes from './src/routes/auth.routes.js';
 import userRoutes from './src/routes/user.routes.js';
 import courseRoutes from './src/routes/course.routes.js';
@@ -17,61 +15,33 @@ import paymentRoutes from './src/routes/payment.routes.js';
 import streamingRoutes from './src/routes/streaming.routes.js';
 import quizRoutes from './src/routes/quiz.routes.js';
 import certificateRoutes from './src/routes/certificate.routes.js';
+import auditRoutes from './src/routes/audit.routes.js';
 import aiRoutes from './src/routes/ai.routes.js';
 import settingsRoutes from './src/routes/settings.routes.js';
 import securityRoutes from './src/routes/security.routes.js';
 import notificationRoutes from './src/routes/notification.routes.js';
 import deviceRoutes from './src/routes/device.routes.js';
-import courseRequestRoutes from './src/routes/courseRequest.routes.js';
 import couponRoutes from './src/routes/coupon.routes.js';
+import courseRequestRoutes from './src/routes/courseRequest.routes.js';
+import pushRoutes from './src/routes/push.routes.js';
 import seoRoutes from './src/routes/seo.routes.js';
 import topRankerRoutes from './src/routes/topRanker.routes.js';
-import pushRoutes from './src/routes/push.routes.js';
 
 const app = express();
-
-// Enable Gzip Compression
-app.use(compression());
-
-// Trust proxy - required for Render deployment
-app.set('trust proxy', 1);
 
 // Security middleware
 app.use(helmet());
 
-// CORS configuration - Allow Vercel preview deployments + asacademy.site
+// CORS configuration
 app.use(cors({
-    origin: (origin, callback) => {
-        // Allow requests with no origin (like mobile apps, Postman, etc.)
-        if (!origin) return callback(null, true);
-
-        // Allow configured frontend URL
-        if (origin === config.frontendUrl) {
-            return callback(null, true);
-        }
-
-        // Allow all Vercel preview deployments (*.vercel.app)
-        if (origin.match(/^https:\/\/.*\.vercel\.app$/)) {
-            return callback(null, true);
-        }
-
-        // Allow new domain asacademy.site (with and without www)
-        if (origin === 'https://asacademy.site' || origin === 'https://www.asacademy.site') {
-            return callback(null, true);
-        }
-
-        // Allow localhost for development
-        if (origin.match(/^http:\/\/localhost:\d+$/)) {
-            return callback(null, true);
-        }
-
-        // Reject all other origins
-        callback(new Error('Not allowed by CORS'));
-    },
+    origin: config.frontendUrl,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Device-ID']
 }));
+
+// Trust proxy - required for Render deployment
+app.set('trust proxy', 1);
 
 // Rate limiting
 const limiter = rateLimit({
@@ -108,16 +78,18 @@ app.use('/api/payments', paymentRoutes);
 app.use('/api/streaming', streamingRoutes);
 app.use('/api/quizzes', quizRoutes);
 app.use('/api/certificates', certificateRoutes);
+app.use('/api/audit', auditRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/security', securityRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/device', deviceRoutes);
 app.use('/api/devices', deviceRoutes);
-app.use('/api/course-requests', courseRequestRoutes);
 app.use('/api/coupons', couponRoutes);
+app.use('/api/course-requests', courseRequestRoutes);
+app.use('/api/push', pushRoutes);
 app.use('/api/seo', seoRoutes);
 app.use('/api/top-rankers', topRankerRoutes);
-app.use('/api/push', pushRoutes);
 
 // 404 handler
 app.use('*', (req, res) => {
@@ -135,12 +107,7 @@ const PORT = config.port;
 app.listen(PORT, () => {
     console.log(`🚀 AS Academy LMS Backend running on port ${PORT}`);
     console.log(`📝 Environment: ${config.nodeEnv}`);
-
-    // Display appropriate health check URL based on environment
-    const healthUrl = config.nodeEnv === 'production'
-        ? `https://your-backend.onrender.com/health (Update this URL after deployment)`
-        : `http://localhost:${PORT}/health`;
-    console.log(`🔗 Health check: ${healthUrl}`);
+    console.log(`🔗 Health check: http://localhost:${PORT}/health`);
 });
 
 export default app;

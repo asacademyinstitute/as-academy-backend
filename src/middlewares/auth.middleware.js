@@ -2,6 +2,7 @@ import jwt from 'jsonwebtoken';
 import { config } from '../config/config.js';
 import { AppError } from './error.middleware.js';
 import supabase from '../config/database.js';
+export { authorize } from './rbac.middleware.js';
 
 export const authenticate = async (req, res, next) => {
     try {

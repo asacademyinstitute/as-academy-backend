@@ -1,3 +1,4 @@
+import axios from 'axios';
 import supabase from '../config/database.js';
 import { AppError } from '../middlewares/error.middleware.js';
 import crypto from 'crypto';
@@ -97,6 +98,67 @@ class StreamingService {
             };
         } catch (error) {
             throw error;
+        }
+    }
+
+    // Stream PDF directly to client with strict authorization check
+    async streamPDF(lectureId, userId, role = 'student', res) {
+        try {
+            // Get lecture details
+            const { data: lecture, error: lectureError } = await supabase
+                .from('lectures')
+                .select('*, chapters(course_id)')
+                .eq('id', lectureId)
+                .eq('type', 'pdf')
+                .single();
+
+            if (lectureError || !lecture) {
+                throw new AppError('Lecture not found', 404);
+            }
+
+            // Only check enrollment if the user is a student
+            if (role !== 'teacher' && role !== 'admin') {
+                const { data: enrollment, error: enrollError } = await supabase
+                    .from('enrollments')
+                    .select('*')
+                    .eq('student_id', userId)
+                    .eq('course_id', lecture.chapters.course_id)
+                    .eq('status', 'active')
+                    .single();
+
+                if (enrollError || !enrollment) {
+                    throw new AppError('Not enrolled in this course', 403);
+                }
+
+                if (enrollment.valid_until && new Date(enrollment.valid_until) < new Date()) {
+                    throw new AppError('Course enrollment has expired', 403);
+                }
+            }
+
+            // Generate short-lived signed URL for backend fetching (60s validity)
+            const signedB2Url = await this.getSignedUrl(lecture.file_url, 60);
+
+            // Fetch stream from B2 server-to-server
+            const response = await axios.get(signedB2Url, {
+                responseType: 'stream',
+                timeout: 30000,
+            });
+
+            // Set secure streaming headers
+            res.setHeader('Content-Type', response.headers['content-type'] || 'application/pdf');
+            if (response.headers['content-length']) {
+                res.setHeader('Content-Length', response.headers['content-length']);
+            }
+            res.setHeader('Content-Disposition', 'inline; filename="lecture.pdf"');
+            res.setHeader('Cache-Control', 'private, no-store, no-cache, must-revalidate');
+            res.setHeader('Pragma', 'no-cache');
+            res.setHeader('Expires', '0');
+
+            response.data.pipe(res);
+        } catch (error) {
+            console.error('StreamingService streamPDF error:', error.message || error);
+            if (error instanceof AppError) throw error;
+            throw new AppError('Failed to stream PDF', 500);
         }
     }
 

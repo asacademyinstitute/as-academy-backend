@@ -43,6 +43,16 @@ router.get('/pdf/:lectureId', authenticate, asyncHandler(async (req, res) => {
     });
 }));
 
+// Stream PDF directly (student/teacher/admin - requires valid auth and active course enrollment)
+router.get('/stream/pdf/:lectureId', authenticate, asyncHandler(async (req, res) => {
+    await streamingService.streamPDF(
+        req.params.lectureId,
+        req.user.id,
+        req.user.role,
+        res
+    );
+}));
+
 // Upload lecture file (teacher or admin only)
 router.post('/upload', authenticate, isTeacherOrAdmin, upload.single('file'), asyncHandler(async (req, res) => {
     if (!req.file) {
