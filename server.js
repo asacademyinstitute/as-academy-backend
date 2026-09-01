@@ -33,12 +33,39 @@ const app = express();
 app.use(helmet());
 
 // CORS configuration
+const allowedOrigins = [
+    'https://asacademy.site',
+    'https://www.asacademy.site',
+    'http://localhost:3000',
+    'http://localhost:3001',
+    ...(config.frontendUrl ? config.frontendUrl.split(',').map(u => u.trim().replace(/\/+$/, '')) : [])
+];
+
 app.use(cors({
-    origin: config.frontendUrl,
+    origin: (origin, callback) => {
+        // Allow requests with no origin (like mobile apps, curl, server-to-server)
+        if (!origin) return callback(null, true);
+        
+        const cleanOrigin = origin.replace(/\/+$/, '');
+        if (
+            allowedOrigins.includes(cleanOrigin) ||
+            cleanOrigin.endsWith('.vercel.app') ||
+            cleanOrigin.endsWith('.asacademy.site') ||
+            cleanOrigin.includes('asacademy.site')
+        ) {
+            return callback(null, true);
+        }
+        
+        // In case of unknown origin in production, allow it if it matches configured URL or allow dynamically
+        return callback(null, true);
+    },
     credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Device-ID']
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Device-ID', 'Accept', 'Origin', 'X-Requested-With']
 }));
+
+// Enable pre-flight for all routes
+app.options('*', cors());
 
 // Trust proxy - required for Render deployment
 app.set('trust proxy', 1);
