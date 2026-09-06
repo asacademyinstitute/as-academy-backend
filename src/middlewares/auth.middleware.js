@@ -6,14 +6,19 @@ export { authorize } from './rbac.middleware.js';
 
 export const authenticate = async (req, res, next) => {
     try {
-        // Get token from header
+        // Get token from header or query parameter (for media tags)
+        let token = null;
         const authHeader = req.headers.authorization;
 
-        if (!authHeader || !authHeader.startsWith('Bearer ')) {
-            throw new AppError('No token provided. Please login.', 401);
+        if (authHeader && authHeader.startsWith('Bearer ')) {
+            token = authHeader.split(' ')[1];
+        } else if (req.query && req.query.token) {
+            token = req.query.token;
         }
 
-        const token = authHeader.split(' ')[1];
+        if (!token) {
+            throw new AppError('No token provided. Please login.', 401);
+        }
 
         // Verify token
         const decoded = jwt.verify(token, config.jwtSecret);
@@ -40,7 +45,7 @@ export const authenticate = async (req, res, next) => {
         // Handle device tracking and validation for students
         if (user.role === 'student') {
             const tokenDeviceId = decoded.deviceId;
-            const requestDeviceId = req.headers['x-device-id'];
+            const requestDeviceId = req.headers['x-device-id'] || req.query?.deviceId || tokenDeviceId;
 
             // 1. Device Tracking: Upsert device details
             try {

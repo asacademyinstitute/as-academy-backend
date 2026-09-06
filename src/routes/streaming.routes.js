@@ -29,6 +29,17 @@ router.get('/video/:lectureId', authenticate, asyncHandler(async (req, res) => {
     });
 }));
 
+// Stream Video directly with Range support (authenticated streaming proxy)
+router.get('/stream/video/:lectureId', authenticate, asyncHandler(async (req, res) => {
+    await streamingService.streamVideo(
+        req.params.lectureId,
+        req.user.id,
+        req.user.role,
+        req,
+        res
+    );
+}));
+
 // Get PDF stream URL (student)
 router.get('/pdf/:lectureId', authenticate, asyncHandler(async (req, res) => {
     const result = await streamingService.generatePDFStreamUrl(

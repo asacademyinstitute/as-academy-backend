@@ -162,6 +162,77 @@ class StreamingService {
         }
     }
 
+    // Stream Video directly to client with HTTP Range / Partial Content support
+    async streamVideo(lectureId, userId, role = 'student', req, res) {
+        try {
+            // Get lecture details
+            const { data: lecture, error: lectureError } = await supabase
+                .from('lectures')
+                .select('*, chapters(course_id)')
+                .eq('id', lectureId)
+                .eq('type', 'video')
+                .single();
+
+            if (lectureError || !lecture) {
+                throw new AppError('Lecture not found', 404);
+            }
+
+            // Only check enrollment if the user is a student
+            if (role !== 'teacher' && role !== 'admin') {
+                const { data: enrollment, error: enrollError } = await supabase
+                    .from('enrollments')
+                    .select('*')
+                    .eq('student_id', userId)
+                    .eq('course_id', lecture.chapters.course_id)
+                    .eq('status', 'active')
+                    .single();
+
+                if (enrollError || !enrollment) {
+                    throw new AppError('Not enrolled in this course', 403);
+                }
+
+                if (enrollment.valid_until && new Date(enrollment.valid_until) < new Date()) {
+                    throw new AppError('Course enrollment has expired', 403);
+                }
+            }
+
+            // Generate short-lived signed URL for internal backend fetching (120s validity)
+            const signedB2Url = await this.getSignedUrl(lecture.file_url, 120);
+
+            const rangeHeader = req.headers.range;
+            const requestHeaders = {};
+            if (rangeHeader) {
+                requestHeaders['Range'] = rangeHeader;
+            }
+
+            // Fetch stream from B2 server-to-server with range headers if present
+            const response = await axios.get(signedB2Url, {
+                responseType: 'stream',
+                headers: requestHeaders,
+                validateStatus: (status) => status >= 200 && status < 400,
+                timeout: 60000,
+            });
+
+            // Forward status code (e.g. 206 Partial Content or 200 OK)
+            res.status(response.status);
+
+            // Forward relevant headers
+            if (response.headers['content-type']) res.setHeader('Content-Type', response.headers['content-type']);
+            if (response.headers['content-length']) res.setHeader('Content-Length', response.headers['content-length']);
+            if (response.headers['content-range']) res.setHeader('Content-Range', response.headers['content-range']);
+            if (response.headers['accept-ranges']) res.setHeader('Accept-Ranges', response.headers['accept-ranges']);
+            res.setHeader('Cache-Control', 'private, no-cache, no-store, must-revalidate');
+
+            response.data.pipe(res);
+        } catch (error) {
+            console.error('StreamingService streamVideo error:', error.message || error);
+            if (!res.headersSent) {
+                if (error instanceof AppError) throw error;
+                throw new AppError('Failed to stream video', 500);
+            }
+        }
+    }
+
     // Upload file to Backblaze B2
     async uploadFile(file, folder = 'lectures') {
         try {
