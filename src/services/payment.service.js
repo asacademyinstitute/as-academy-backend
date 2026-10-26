@@ -123,9 +123,16 @@ class PaymentService {
      */
     async processPayment(orderId, paymentId, signature) {
         try {
+            // Validate all required fields
+            if (!orderId || !paymentId || !signature) {
+                console.error('processPayment: Missing fields:', { orderId, paymentId, signaturePresent: !!signature });
+                throw new AppError('Missing payment fields: orderId, paymentId, and signature are required', 400);
+            }
+
             // Verify signature
             const isValid = this.verifyPayment(orderId, paymentId, signature);
             if (!isValid) {
+                console.error('processPayment: Signature mismatch for orderId:', orderId);
                 throw new AppError('Invalid payment signature', 400);
             }
 
@@ -137,10 +144,30 @@ class PaymentService {
                 .single();
 
             if (paymentError || !payment) {
+                console.error('processPayment: Payment record not found for orderId:', orderId, paymentError);
                 throw new AppError('Payment record not found', 404);
             }
 
-            // Update payment status
+            // Idempotency: if already marked success, just check enrollment and return
+            if (payment.status === 'success') {
+                const { data: existingEnrollment } = await supabase
+                    .from('enrollments')
+                    .select('*')
+                    .eq('student_id', payment.student_id)
+                    .eq('course_id', payment.course_id)
+                    .eq('status', 'active')
+                    .maybeSingle();
+
+                if (existingEnrollment) {
+                    return {
+                        success: true,
+                        enrollment: existingEnrollment,
+                        message: 'Already enrolled in course',
+                    };
+                }
+            }
+
+            // Update payment status to success
             await supabase
                 .from('payments')
                 .update({
@@ -161,7 +188,24 @@ class PaymentService {
             const validUntil = new Date();
             validUntil.setDate(validUntil.getDate() + validityDays);
 
-            // Create enrollment
+            // Check if enrollment already exists (avoid duplicate key)
+            const { data: existingEnrollment } = await supabase
+                .from('enrollments')
+                .select('*')
+                .eq('student_id', payment.student_id)
+                .eq('course_id', payment.course_id)
+                .eq('status', 'active')
+                .maybeSingle();
+
+            if (existingEnrollment) {
+                return {
+                    success: true,
+                    enrollment: existingEnrollment,
+                    message: 'Payment successful - already enrolled in course',
+                };
+            }
+
+            // Create new enrollment
             const { data: enrollment, error: enrollError } = await supabase
                 .from('enrollments')
                 .insert({
@@ -175,7 +219,8 @@ class PaymentService {
                 .single();
 
             if (enrollError) {
-                throw new AppError('Failed to create enrollment', 500);
+                console.error('processPayment: Enrollment insert failed:', JSON.stringify(enrollError));
+                throw new AppError(`Failed to create enrollment: ${enrollError.message}`, 500);
             }
 
             return {

@@ -31,7 +31,10 @@ router.post('/create-order', authenticate, async (req, res, next) => {
  */
 router.post('/verify', authenticate, async (req, res, next) => {
     try {
-        const { orderId, paymentId, signature } = req.body;
+            // Accept both Razorpay native field names (razorpay_*) and plain names
+        const orderId = req.body.orderId || req.body.razorpay_order_id;
+        const paymentId = req.body.paymentId || req.body.razorpay_payment_id;
+        const signature = req.body.signature || req.body.razorpay_signature;
 
         const result = await paymentService.processPayment(orderId, paymentId, signature);
 
