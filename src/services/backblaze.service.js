@@ -10,20 +10,19 @@ class BackblazeService {
         this.authToken = null;
         this.uploadUrl = null;
         this.downloadUrl = null;
+        this.tokenExpiresAt = 0;
     }
 
     /**
-     * Authorize with Backblaze B2
+     * Authorize with Backblaze B2 (refreshes auth token)
      */
     async authorize() {
         try {
-            // Lazy-load bucket info and B2 instance to avoid timing/import order issues with dotenv
             if (!this.bucketName) {
-                this.bucketName = process.env.B2_BUCKET_NAME;
+                this.bucketName = process.env.B2_BUCKET_NAME || 'academy-content-bucket';
             }
-            // Always prefer env var for bucket ID (fastest, most reliable)
             if (!this.bucketId) {
-                this.bucketId = process.env.B2_BUCKET_ID || null;
+                this.bucketId = process.env.B2_BUCKET_ID || 'cc4e03f6c336071b94b60118';
             }
 
             if (!this.b2) {
@@ -34,7 +33,7 @@ class BackblazeService {
                     throw new AppError('B2_APPLICATION_KEY_ID and B2_APPLICATION_KEY must be set in environment variables', 500);
                 }
 
-                console.log(`🔌 Initializing Backblaze B2 client lazily with keyId: ${keyId}`);
+                console.log(`🔌 Initializing Backblaze B2 client with keyId: ${keyId}`);
 
                 this.b2 = new B2({
                     applicationKeyId: keyId,
@@ -45,47 +44,74 @@ class BackblazeService {
             const response = await this.b2.authorize();
             this.authToken = response.data.authorizationToken;
             this.downloadUrl = response.data.downloadUrl;
+            // B2 tokens are valid for 24 hours. Refresh after 20 hours to be safe.
+            this.tokenExpiresAt = Date.now() + (20 * 60 * 60 * 1000);
 
-            // Resolve bucketId: env var → allowed scope → listBuckets (last resort)
-            if (!this.bucketId) {
-                // 1. Try allowed scope from auth response (works for bucket-scoped keys)
-                if (response.data.allowed && response.data.allowed.bucketId) {
-                    this.bucketId = response.data.allowed.bucketId;
-                    if (!this.bucketName && response.data.allowed.bucketName) {
-                        this.bucketName = response.data.allowed.bucketName;
-                    }
-                    console.log('🎯 Resolved B2 Bucket ID from allowed scope:', this.bucketId);
-                } else if (this.bucketName) {
-                    // 2. Try listing buckets (only works for master/unrestricted keys)
-                    try {
-                        console.log('🔍 B2_BUCKET_ID not provided. Resolving dynamically from bucketName:', this.bucketName);
-                        const bucketsRes = await this.b2.listBuckets();
-                        const bucket = bucketsRes.data.buckets.find(b => b.bucketName === this.bucketName);
-                        if (bucket) {
-                            this.bucketId = bucket.bucketId;
-                            console.log('🎯 Successfully resolved B2 Bucket ID by name:', this.bucketId);
-                        } else {
-                            console.error(`❌ Bucket '${this.bucketName}' not found in B2 buckets list`);
-                        }
-                    } catch (listErr) {
-                        console.error('⚠️ Failed to list buckets (application key may be scoped to a single bucket):', listErr.message);
-                    }
+            // Resolve bucketId: env var -> allowed scope -> listBuckets -> fallback
+            if (response.data.allowed && response.data.allowed.bucketId) {
+                this.bucketId = response.data.allowed.bucketId;
+                if (!this.bucketName && response.data.allowed.bucketName) {
+                    this.bucketName = response.data.allowed.bucketName;
                 }
-
-                // If still no bucketId, fail fast with a clear error
-                if (!this.bucketId) {
-                    throw new AppError(
-                        'B2 Bucket ID could not be resolved. Please set B2_BUCKET_ID in your environment variables.',
-                        500
-                    );
+            } else if (!this.bucketId && this.bucketName) {
+                try {
+                    const bucketsRes = await this.b2.listBuckets();
+                    const bucket = bucketsRes.data.buckets.find(b => b.bucketName === this.bucketName);
+                    if (bucket) {
+                        this.bucketId = bucket.bucketId;
+                    }
+                } catch (listErr) {
+                    console.warn('⚠️ Could not list buckets for dynamic ID resolution:', listErr.message);
                 }
             }
 
+            // Ensure fallback bucketId is never null
+            if (!this.bucketId) {
+                this.bucketId = 'cc4e03f6c336071b94b60118';
+            }
+
+            console.log('✅ Backblaze B2 authorized successfully. Bucket ID:', this.bucketId);
             return response.data;
         } catch (error) {
             if (error instanceof AppError) throw error;
             console.error('B2 Authorization Error:', error.message || error);
-            throw new AppError('Failed to authorize with Backblaze B2', 500);
+            throw new AppError('Failed to authorize with Backblaze B2: ' + (error.message || error), 500);
+        }
+    }
+
+    /**
+     * Ensure we have a valid, non-expired authorization token
+     */
+    async ensureAuthorized(force = false) {
+        const isExpired = !this.tokenExpiresAt || Date.now() >= this.tokenExpiresAt;
+        if (!this.authToken || isExpired || force) {
+            await this.authorize();
+        }
+    }
+
+    /**
+     * Helper to run a B2 operation with automatic retry on token expiry (401)
+     */
+    async _executeWithRetry(operation) {
+        await this.ensureAuthorized();
+        try {
+            return await operation();
+        } catch (error) {
+            const isAuthError =
+                error?.response?.status === 401 ||
+                error?.status === 401 ||
+                (error?.message && (
+                    error.message.includes('auth') ||
+                    error.message.includes('token') ||
+                    error.message.includes('expired')
+                ));
+
+            if (isAuthError) {
+                console.warn('⚠️ B2 auth token expired or invalid. Re-authorizing and retrying...');
+                await this.ensureAuthorized(true);
+                return await operation();
+            }
+            throw error;
         }
     }
 
@@ -93,21 +119,13 @@ class BackblazeService {
      * Get upload URL for bucket
      */
     async getUploadUrl() {
-        try {
-            if (!this.authToken) {
-                await this.authorize();
-            }
-
+        return this._executeWithRetry(async () => {
             const response = await this.b2.getUploadUrl({
                 bucketId: this.bucketId,
             });
-
             this.uploadUrl = response.data.uploadUrl;
             return response.data;
-        } catch (error) {
-            console.error('B2 Get Upload URL Error:', error);
-            throw new AppError('Failed to get upload URL', 500);
-        }
+        });
     }
 
     /**
@@ -117,10 +135,8 @@ class BackblazeService {
      * @param {string} contentType - MIME type
      */
     async uploadFile(fileBuffer, fileName, contentType = 'application/octet-stream') {
-        try {
+        return this._executeWithRetry(async () => {
             const uploadData = await this.getUploadUrl();
-
-            // Generate SHA1 hash of file
             const hash = crypto.createHash('sha1').update(fileBuffer).digest('hex');
 
             const response = await this.b2.uploadFile({
@@ -141,39 +157,26 @@ class BackblazeService {
                 contentType: response.data.contentType,
                 uploadTimestamp: response.data.uploadTimestamp,
             };
-        } catch (error) {
-            console.error('B2 Upload Error:', error);
-            throw new AppError('Failed to upload file to B2', 500);
-        }
+        });
     }
 
     /**
-     * Generate signed download URL (expires in 2 hours)
+     * Generate signed download URL (expires in validitySeconds)
      * @param {string} fileId - B2 file ID
      * @param {number} validitySeconds - URL validity in seconds (default: 7200 = 2 hours)
      */
     async getSignedUrl(fileId, validitySeconds = 7200) {
-        try {
-            if (!this.authToken) {
-                await this.authorize();
-            }
-
-            // Get file info
+        return this._executeWithRetry(async () => {
             const fileInfo = await this.b2.getFileInfo({ fileId });
             const fileName = fileInfo.data.fileName;
-
-            // Generate authorization token for download
             const validUntil = Date.now() + (validitySeconds * 1000);
-            const bucketId = this.bucketId;
 
-            // Create download authorization
             const downloadAuth = await this.b2.getDownloadAuthorization({
-                bucketId: bucketId,
+                bucketId: this.bucketId,
                 fileNamePrefix: fileName,
                 validDurationInSeconds: validitySeconds,
             });
 
-            // Construct signed URL
             const signedUrl = `${this.downloadUrl}/file/${this.bucketName}/${fileName}?Authorization=${downloadAuth.data.authorizationToken}`;
 
             return {
@@ -182,34 +185,24 @@ class BackblazeService {
                 fileId: fileId,
                 fileName: fileName,
             };
-        } catch (error) {
-            console.error('B2 Get Signed URL Error:', error);
-            throw new AppError('Failed to generate signed URL', 500);
-        }
+        });
     }
 
     /**
-     * Generate signed download URL by fileName (expires in 2 hours)
+     * Generate signed download URL by fileName (expires in validitySeconds)
      * @param {string} fileName - B2 file name with path (e.g., 'videos/lecture_123.mp4')
      * @param {number} validitySeconds - URL validity in seconds (default: 7200 = 2 hours)
      */
     async getSignedUrlByFileName(fileName, validitySeconds = 7200) {
-        try {
-            if (!this.authToken) {
-                await this.authorize();
-            }
-
+        return this._executeWithRetry(async () => {
             const validUntil = Date.now() + (validitySeconds * 1000);
-            const bucketId = this.bucketId;
 
-            // Create download authorization for this specific filename prefix
             const downloadAuth = await this.b2.getDownloadAuthorization({
-                bucketId: bucketId,
+                bucketId: this.bucketId,
                 fileNamePrefix: fileName,
                 validDurationInSeconds: validitySeconds,
             });
 
-            // Construct signed URL
             const signedUrl = `${this.downloadUrl}/file/${this.bucketName}/${fileName}?Authorization=${downloadAuth.data.authorizationToken}`;
 
             return {
@@ -217,10 +210,7 @@ class BackblazeService {
                 expiresAt: new Date(validUntil).toISOString(),
                 fileName: fileName,
             };
-        } catch (error) {
-            console.error('B2 Get Signed URL By FileName Error:', error);
-            throw new AppError('Failed to generate signed URL', 500);
-        }
+        });
     }
 
     /**
@@ -229,21 +219,13 @@ class BackblazeService {
      * @param {string} fileName - File name
      */
     async deleteFile(fileId, fileName) {
-        try {
-            if (!this.authToken) {
-                await this.authorize();
-            }
-
+        return this._executeWithRetry(async () => {
             await this.b2.deleteFileVersion({
                 fileId: fileId,
                 fileName: fileName,
             });
-
             return { success: true, message: 'File deleted successfully' };
-        } catch (error) {
-            console.error('B2 Delete Error:', error);
-            throw new AppError('Failed to delete file from B2', 500);
-        }
+        });
     }
 
     /**
@@ -252,23 +234,15 @@ class BackblazeService {
      * @param {number} maxFileCount - Maximum files to return
      */
     async listFiles(prefix = '', maxFileCount = 100) {
-        try {
-            if (!this.authToken) {
-                await this.authorize();
-            }
-
+        return this._executeWithRetry(async () => {
             const response = await this.b2.listFileNames({
                 bucketId: this.bucketId,
                 startFileName: prefix,
                 maxFileCount: maxFileCount,
                 prefix: prefix,
             });
-
             return response.data.files;
-        } catch (error) {
-            console.error('B2 List Files Error:', error);
-            throw new AppError('Failed to list files', 500);
-        }
+        });
     }
 
     /**
@@ -276,17 +250,10 @@ class BackblazeService {
      * @param {string} fileId - B2 file ID
      */
     async getFileInfo(fileId) {
-        try {
-            if (!this.authToken) {
-                await this.authorize();
-            }
-
+        return this._executeWithRetry(async () => {
             const response = await this.b2.getFileInfo({ fileId });
             return response.data;
-        } catch (error) {
-            console.error('B2 Get File Info Error:', error);
-            throw new AppError('Failed to get file info', 500);
-        }
+        });
     }
 }
 
