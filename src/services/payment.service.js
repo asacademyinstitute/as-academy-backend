@@ -700,7 +700,8 @@ class PaymentService {
                 users:student_id (
                     id,
                     name,
-                    email
+                    email,
+                    phone
                 ),
                 courses:course_id (
                     id,
