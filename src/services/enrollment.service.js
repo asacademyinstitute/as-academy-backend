@@ -1,6 +1,7 @@
 import supabase from '../config/database.js';
 import { AppError } from '../middlewares/error.middleware.js';
 import auditService from './audit.service.js';
+import paymentService from './payment.service.js';
 
 class EnrollmentService {
     // Enroll student in course
@@ -151,6 +152,13 @@ class EnrollmentService {
 
     // Get student enrollments
     async getStudentEnrollments(studentId) {
+        // Auto-sync any pending payments from the last 48 hours for this student
+        try {
+            await paymentService.autoSyncPendingPayments(studentId);
+        } catch (syncErr) {
+            console.error('[EnrollmentService] autoSync error in getStudentEnrollments:', syncErr);
+        }
+
         const { data: enrollments, error } = await supabase
             .from('enrollments')
             .select(`
@@ -214,15 +222,27 @@ class EnrollmentService {
 
     // Check if student has access to course
     async checkAccess(studentId, courseId) {
-        const { data: enrollment, error } = await supabase
+        let { data: enrollment, error } = await supabase
             .from('enrollments')
             .select('*')
             .eq('student_id', studentId)
             .eq('course_id', courseId)
             .eq('status', 'active')
-            .single();
+            .maybeSingle();
 
-        if (error || !enrollment) {
+        // If not found active, check if there is an un-synced successful order from Razorpay
+        if (!enrollment) {
+            try {
+                const synced = await paymentService.autoSyncPendingPayments(studentId, courseId);
+                if (synced && synced.length > 0) {
+                    enrollment = synced[0];
+                }
+            } catch (syncErr) {
+                console.error('[EnrollmentService] autoSync error in checkAccess:', syncErr);
+            }
+        }
+
+        if (!enrollment) {
             return { hasAccess: false, reason: 'Not enrolled' };
         }
 

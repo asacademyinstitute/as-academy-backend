@@ -116,6 +116,80 @@ class PaymentService {
     }
 
     /**
+     * Complete payment and enroll student (single source of truth)
+     * @param {object} paymentRecord - Existing record from supabase payments
+     * @param {string} paymentId - Razorpay payment ID (optional)
+     * @param {string} signature - Razorpay signature (optional)
+     */
+    async completePaymentAndEnroll(paymentRecord, paymentId = null, signature = null) {
+        // 1. Idempotency: check if active enrollment already exists
+        const { data: existingEnrollment } = await supabase
+            .from('enrollments')
+            .select('*')
+            .eq('student_id', paymentRecord.student_id)
+            .eq('course_id', paymentRecord.course_id)
+            .eq('status', 'active')
+            .maybeSingle();
+
+        // 2. Update payment status to success
+        const updateData = {
+            status: 'success',
+            updated_at: new Date().toISOString(),
+        };
+        if (paymentId) updateData.razorpay_payment_id = paymentId;
+        if (signature) updateData.razorpay_signature = signature;
+
+        await supabase
+            .from('payments')
+            .update(updateData)
+            .eq('id', paymentRecord.id);
+
+        if (existingEnrollment) {
+            return {
+                success: true,
+                enrollment: existingEnrollment,
+                message: 'Payment verified and student already enrolled',
+            };
+        }
+
+        // 3. Get course validity
+        const { data: course } = await supabase
+            .from('courses')
+            .select('validity_days, title')
+            .eq('id', paymentRecord.course_id)
+            .single();
+
+        const validityDays = course?.validity_days || 365;
+        const validUntil = new Date();
+        validUntil.setDate(validUntil.getDate() + validityDays);
+
+        // 4. Create new active enrollment
+        const { data: enrollment, error: enrollError } = await supabase
+            .from('enrollments')
+            .insert({
+                student_id: paymentRecord.student_id,
+                course_id: paymentRecord.course_id,
+                payment_type: 'online',
+                status: 'active',
+                valid_until: validUntil.toISOString(),
+            })
+            .select()
+            .single();
+
+        if (enrollError) {
+            console.error('Enrollment insert failed in completePaymentAndEnroll:', enrollError);
+            throw new AppError(`Failed to create enrollment: ${enrollError.message}`, 500);
+        }
+
+        console.log(`[PaymentService] Successfully auto-enrolled student ${paymentRecord.student_id} in course ${paymentRecord.course_id}`);
+        return {
+            success: true,
+            enrollment,
+            message: 'Payment verified and enrolled in course successfully',
+        };
+    }
+
+    /**
      * Process successful payment
      * @param {string} orderId - Razorpay order ID
      * @param {string} paymentId - Razorpay payment ID
@@ -123,114 +197,202 @@ class PaymentService {
      */
     async processPayment(orderId, paymentId, signature) {
         try {
-            // Validate all required fields
-            if (!orderId || !paymentId || !signature) {
-                console.error('processPayment: Missing fields:', { orderId, paymentId, signaturePresent: !!signature });
-                throw new AppError('Missing payment fields: orderId, paymentId, and signature are required', 400);
+            if (!orderId && !paymentId) {
+                console.error('processPayment: Missing orderId and paymentId');
+                throw new AppError('orderId or paymentId is required to verify payment', 400);
             }
 
-            // Verify signature
-            const isValid = this.verifyPayment(orderId, paymentId, signature);
+            // 1. Try local HMAC signature verification if all 3 fields are present
+            let isValid = false;
+            if (orderId && paymentId && signature) {
+                isValid = this.verifyPayment(orderId, paymentId, signature);
+            }
+
+            // 2. Direct Razorpay API fallback: if signature failed, missing, or altered
+            if (!isValid && (paymentId || orderId)) {
+                try {
+                    if (paymentId) {
+                        const rzpPayment = await this.razorpay.payments.fetch(paymentId);
+                        if (rzpPayment && (rzpPayment.status === 'captured' || rzpPayment.status === 'authorized')) {
+                            isValid = true;
+                            if (!orderId && rzpPayment.order_id) orderId = rzpPayment.order_id;
+                        }
+                    } else if (orderId) {
+                        const rzpOrder = await this.razorpay.orders.fetch(orderId);
+                        if (rzpOrder && (rzpOrder.status === 'paid' || rzpOrder.amount_paid > 0)) {
+                            isValid = true;
+                        }
+                    }
+                } catch (rzpErr) {
+                    console.error('Direct Razorpay API verification check failed:', rzpErr.message);
+                }
+            }
+
             if (!isValid) {
-                console.error('processPayment: Signature mismatch for orderId:', orderId);
-                throw new AppError('Invalid payment signature', 400);
+                console.error('processPayment: Verification failed for', { orderId, paymentId, signaturePresent: !!signature });
+                throw new AppError('Invalid payment verification: payment not confirmed by gateway', 400);
             }
 
-            // Get payment record
-            const { data: payment, error: paymentError } = await supabase
-                .from('payments')
-                .select('*')
-                .eq('razorpay_order_id', orderId)
-                .single();
+            // 3. Locate the payment record in Supabase
+            let query = supabase.from('payments').select('*');
+            if (orderId) {
+                query = query.eq('razorpay_order_id', orderId);
+            } else {
+                query = query.eq('razorpay_payment_id', paymentId);
+            }
+
+            const { data: payment, error: paymentError } = await query.maybeSingle();
 
             if (paymentError || !payment) {
                 console.error('processPayment: Payment record not found for orderId:', orderId, paymentError);
                 throw new AppError('Payment record not found', 404);
             }
 
-            // Idempotency: if already marked success, just check enrollment and return
-            if (payment.status === 'success') {
-                const { data: existingEnrollment } = await supabase
-                    .from('enrollments')
-                    .select('*')
-                    .eq('student_id', payment.student_id)
-                    .eq('course_id', payment.course_id)
-                    .eq('status', 'active')
-                    .maybeSingle();
+            // 4. Complete enrollment
+            return await this.completePaymentAndEnroll(payment, paymentId, signature);
+        } catch (error) {
+            console.error('Process Payment Error:', error);
+            throw error instanceof AppError ? error : new AppError('Failed to process payment', 500);
+        }
+    }
 
-                if (existingEnrollment) {
-                    return {
-                        success: true,
-                        enrollment: existingEnrollment,
-                        message: 'Already enrolled in course',
-                    };
-                }
+    /**
+     * Direct order verification and synchronization
+     * Useful when mobile client reloads or misses the checkout callback
+     * @param {string} orderId - Razorpay order ID
+     * @param {string} userId - Current user ID (optional validation)
+     */
+    async verifyOrderDirect(orderId, userId = null) {
+        try {
+            if (!orderId) {
+                throw new AppError('Order ID is required', 400);
             }
 
-            // Update payment status to success
-            await supabase
+            const { data: paymentRecord, error: pErr } = await supabase
                 .from('payments')
-                .update({
-                    razorpay_payment_id: paymentId,
-                    razorpay_signature: signature,
-                    status: 'success',
-                })
-                .eq('id', payment.id);
+                .select('*')
+                .eq('razorpay_order_id', orderId)
+                .maybeSingle();
 
-            // Get course validity
-            const { data: course } = await supabase
-                .from('courses')
-                .select('validity_days')
-                .eq('id', payment.course_id)
-                .single();
+            if (pErr || !paymentRecord) {
+                throw new AppError('Payment record not found', 404);
+            }
 
-            const validityDays = course?.validity_days || 365;
-            const validUntil = new Date();
-            validUntil.setDate(validUntil.getDate() + validityDays);
+            if (userId && paymentRecord.student_id !== userId) {
+                throw new AppError('Unauthorized access to order', 403);
+            }
 
-            // Check if enrollment already exists (avoid duplicate key)
+            // If already marked success and enrolled, return early
             const { data: existingEnrollment } = await supabase
                 .from('enrollments')
                 .select('*')
-                .eq('student_id', payment.student_id)
-                .eq('course_id', payment.course_id)
+                .eq('student_id', paymentRecord.student_id)
+                .eq('course_id', paymentRecord.course_id)
                 .eq('status', 'active')
                 .maybeSingle();
 
-            if (existingEnrollment) {
+            if (existingEnrollment && paymentRecord.status === 'success') {
                 return {
                     success: true,
+                    isPaid: true,
+                    isEnrolled: true,
                     enrollment: existingEnrollment,
-                    message: 'Payment successful - already enrolled in course',
+                    message: 'Already enrolled in course',
                 };
             }
 
-            // Create new enrollment
-            const { data: enrollment, error: enrollError } = await supabase
-                .from('enrollments')
-                .insert({
-                    student_id: payment.student_id,
-                    course_id: payment.course_id,
-                    payment_type: 'online',
-                    status: 'active',
-                    valid_until: validUntil.toISOString(),
-                })
-                .select()
-                .single();
+            // Check Razorpay API
+            const rzpOrder = await this.razorpay.orders.fetch(orderId);
+            if (rzpOrder.status === 'paid' || rzpOrder.amount_paid > 0) {
+                let paymentId = paymentRecord.razorpay_payment_id;
+                try {
+                    const paymentsList = await this.razorpay.orders.fetchPayments(orderId);
+                    const capturedPayment = paymentsList.items?.find(p => p.status === 'captured');
+                    if (capturedPayment) {
+                        paymentId = capturedPayment.id;
+                    }
+                } catch (e) {
+                    // Ignore payment listing error
+                }
 
-            if (enrollError) {
-                console.error('processPayment: Enrollment insert failed:', JSON.stringify(enrollError));
-                throw new AppError(`Failed to create enrollment: ${enrollError.message}`, 500);
+                const result = await this.completePaymentAndEnroll(paymentRecord, paymentId);
+                return {
+                    success: true,
+                    isPaid: true,
+                    isEnrolled: true,
+                    enrollment: result.enrollment,
+                    message: result.message,
+                };
             }
 
             return {
                 success: true,
-                enrollment,
-                message: 'Payment successful and enrolled in course',
+                isPaid: false,
+                isEnrolled: !!existingEnrollment,
+                orderStatus: rzpOrder.status,
             };
         } catch (error) {
-            console.error('Process Payment Error:', error);
-            throw error instanceof AppError ? error : new AppError('Failed to process payment', 500);
+            console.error('verifyOrderDirect error:', error);
+            throw error instanceof AppError ? error : new AppError('Failed to verify order status', 500);
+        }
+    }
+
+    /**
+     * Auto-sync any recently created pending payments for a student
+     * This acts as an automated self-healing safety net
+     * @param {string} studentId - Student UUID
+     * @param {string} courseId - Optional Course UUID filter
+     */
+    async autoSyncPendingPayments(studentId, courseId = null) {
+        try {
+            if (!studentId) return [];
+
+            // Look back up to 48 hours for pending online orders
+            const sinceDate = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+            let query = supabase
+                .from('payments')
+                .select('*')
+                .eq('student_id', studentId)
+                .eq('status', 'pending')
+                .not('razorpay_order_id', 'is', null)
+                .gte('created_at', sinceDate)
+                .order('created_at', { ascending: false });
+
+            if (courseId) {
+                query = query.eq('course_id', courseId);
+            }
+
+            const { data: pendingPayments } = await query;
+            if (!pendingPayments || pendingPayments.length === 0) {
+                return [];
+            }
+
+            const syncedEnrollments = [];
+            for (const payment of pendingPayments) {
+                try {
+                    const rzpOrder = await this.razorpay.orders.fetch(payment.razorpay_order_id);
+                    if (rzpOrder && (rzpOrder.status === 'paid' || rzpOrder.amount_paid > 0)) {
+                        let paymentId = payment.razorpay_payment_id;
+                        try {
+                            const paymentsList = await this.razorpay.orders.fetchPayments(payment.razorpay_order_id);
+                            const captured = paymentsList.items?.find(p => p.status === 'captured');
+                            if (captured) paymentId = captured.id;
+                        } catch (pErr) {}
+
+                        const result = await this.completePaymentAndEnroll(payment, paymentId);
+                        if (result?.enrollment) {
+                            syncedEnrollments.push(result.enrollment);
+                        }
+                    }
+                } catch (err) {
+                    console.warn(`[AutoSync] Could not check order ${payment.razorpay_order_id}:`, err.message);
+                }
+            }
+
+            return syncedEnrollments;
+        } catch (error) {
+            console.error('[AutoSync] Error in autoSyncPendingPayments:', error);
+            return [];
         }
     }
 
@@ -241,25 +403,39 @@ class PaymentService {
      */
     async handleWebhook(event, signature) {
         try {
-            // Verify webhook signature
             const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
-            const expectedSignature = crypto
-                .createHmac('sha256', webhookSecret)
-                .update(JSON.stringify(event))
-                .digest('hex');
+            if (webhookSecret && signature) {
+                const expectedSignature = crypto
+                    .createHmac('sha256', webhookSecret)
+                    .update(typeof event === 'string' ? event : JSON.stringify(event))
+                    .digest('hex');
 
-            if (expectedSignature !== signature) {
-                throw new AppError('Invalid webhook signature', 400);
+                if (expectedSignature !== signature) {
+                    console.error('Invalid webhook signature');
+                    throw new AppError('Invalid webhook signature', 400);
+                }
             }
 
             // Handle different event types
             switch (event.event) {
                 case 'payment.captured':
-                    await this.handlePaymentCaptured(event.payload.payment.entity);
+                case 'order.paid': {
+                    const paymentEntity = event.payload?.payment?.entity;
+                    const orderEntity = event.payload?.order?.entity;
+                    const orderId = paymentEntity?.order_id || orderEntity?.id;
+                    const paymentId = paymentEntity?.id;
+                    if (orderId) {
+                        await this.handlePaymentCaptured({ order_id: orderId, id: paymentId });
+                    }
                     break;
-                case 'payment.failed':
-                    await this.handlePaymentFailed(event.payload.payment.entity);
+                }
+                case 'payment.failed': {
+                    const paymentEntity = event.payload?.payment?.entity;
+                    if (paymentEntity) {
+                        await this.handlePaymentFailed(paymentEntity);
+                    }
                     break;
+                }
                 default:
                     console.log('Unhandled webhook event:', event.event);
             }
@@ -275,14 +451,20 @@ class PaymentService {
      * Handle payment captured event
      */
     async handlePaymentCaptured(payment) {
+        const orderId = payment.order_id;
+        if (!orderId) {
+            console.warn('handlePaymentCaptured: No order_id present');
+            return;
+        }
+
         const { data: paymentRecord } = await supabase
             .from('payments')
             .select('*')
-            .eq('order_id', payment.order_id)
-            .single();
+            .eq('razorpay_order_id', orderId)
+            .maybeSingle();
 
         if (paymentRecord && paymentRecord.status !== 'success') {
-            await this.processPayment(payment.order_id, payment.id, payment.signature);
+            await this.completePaymentAndEnroll(paymentRecord, payment.id, null);
         }
     }
 
@@ -290,14 +472,17 @@ class PaymentService {
      * Handle payment failed event
      */
     async handlePaymentFailed(payment) {
+        const orderId = payment.order_id;
+        if (!orderId) return;
+
         await supabase
             .from('payments')
             .update({
-                payment_id: payment.id,
+                razorpay_payment_id: payment.id,
                 status: 'failed',
-                error_description: payment.error_description,
+                error_description: payment.error_description || 'Payment failed',
             })
-            .eq('order_id', payment.order_id);
+            .eq('razorpay_order_id', orderId);
     }
 
     /**

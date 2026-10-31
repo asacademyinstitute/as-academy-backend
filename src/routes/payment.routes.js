@@ -48,6 +48,24 @@ router.post('/verify', authenticate, async (req, res, next) => {
 });
 
 /**
+ * Sync order status directly from Razorpay (fallback for mobile redirects & missed webhooks)
+ * POST /api/payments/sync-order
+ */
+router.post('/sync-order', authenticate, async (req, res, next) => {
+    try {
+        const orderId = req.body.orderId || req.body.razorpay_order_id;
+        const result = await paymentService.verifyOrderDirect(orderId, req.user.id);
+
+        res.status(200).json({
+            success: true,
+            data: result,
+        });
+    } catch (error) {
+        next(error);
+    }
+});
+
+/**
  * Razorpay webhook
  * POST /api/payments/webhook
  */
