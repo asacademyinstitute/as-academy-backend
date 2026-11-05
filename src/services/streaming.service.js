@@ -222,6 +222,7 @@ class StreamingService {
             if (response.headers['content-range']) res.setHeader('Content-Range', response.headers['content-range']);
             if (response.headers['accept-ranges']) res.setHeader('Accept-Ranges', response.headers['accept-ranges']);
             res.setHeader('Cache-Control', 'private, no-cache, no-store, must-revalidate');
+            res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
 
             response.data.pipe(res);
         } catch (error) {
