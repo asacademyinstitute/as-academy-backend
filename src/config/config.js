@@ -21,8 +21,8 @@ export const config = {
 
     // Web Push (VAPID)
     vapid: {
-        publicKey: (process.env.VAPID_PUBLIC_KEY || 'BORL6gYzIhiENV-9swn6n5plyVncDh5B59iBiiCRlv8im74uobE2uIWSj3xurbBHA_DED04BqLLjh4qaq6fL2qQ').replace(/['"]/g, '').trim(),
-        privateKey: (process.env.VAPID_PRIVATE_KEY || '33XxEqayxQA8c81ctFLGcrv7OEEZtRuqMqcVNUbzXnM').replace(/['"]/g, '').trim(),
+        publicKey: (process.env.VAPID_PUBLIC_KEY || '').replace(/['"]/g, '').trim(),
+        privateKey: (process.env.VAPID_PRIVATE_KEY || '').replace(/['"]/g, '').trim(),
         mailto: (process.env.VAPID_MAILTO || 'mailto:info@asacademy.site').replace(/['"]/g, '').trim()
     },
 
@@ -79,3 +79,13 @@ export const config = {
         max: 1000, // limit each IP to 1000 requests per windowMs (increased for development)
     },
 };
+
+// Fail-fast security check in production
+if (process.env.NODE_ENV === 'production') {
+    if (!process.env.JWT_SECRET || process.env.JWT_SECRET.includes('your-super-secret')) {
+        console.error('⚠️ [CRITICAL SECURITY WARNING]: JWT_SECRET is not securely set in production!');
+    }
+    if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+        console.error('⚠️ [CRITICAL SECURITY WARNING]: SUPABASE_SERVICE_ROLE_KEY is missing!');
+    }
+}

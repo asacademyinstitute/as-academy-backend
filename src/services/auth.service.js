@@ -9,7 +9,8 @@ import settingsService from './settings.service.js';
 class AuthService {
     // Register new user
     async register(userData) {
-        const { name, email, phone, password, enrollment_number, college_name, semester, role = 'student', deviceId } = userData;
+        // SECURITY: role is never accepted from client input — always 'student' on self-registration
+        const { name, email, phone, password, enrollment_number, college_name, semester, deviceId } = userData;
 
         // Check if user already exists
         const { data: existingUser } = await supabase
@@ -36,7 +37,7 @@ class AuthService {
                 enrollment_number,
                 college_name,
                 semester,
-                role,
+                role: 'student', // SECURITY: always enforce student role on self-registration
                 status: 'active'
             })
             .select('id, name, email, phone, role, enrollment_number, college_name, semester, created_at')
@@ -67,7 +68,7 @@ class AuthService {
             .single();
 
         if (error || !user) {
-            throw new AppError('Email wrong. This email is not registered.', 401);
+            throw new AppError('Invalid email or password.', 401);
         }
 
         // Check if user is blocked
@@ -78,7 +79,7 @@ class AuthService {
         // Verify password
         const isPasswordValid = await bcrypt.compare(password, user.password_hash);
         if (!isPasswordValid) {
-            throw new AppError('Password wrong. Please check your password.', 401);
+            throw new AppError('Invalid email or password.', 401);
         }
 
         // For students, check device limit

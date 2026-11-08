@@ -45,11 +45,11 @@ export const authenticate = async (req, res, next) => {
         // Handle device tracking and validation for students
         if (user.role === 'student') {
             const tokenDeviceId = decoded.deviceId;
-            const requestDeviceId = req.headers['x-device-id'] || req.query?.deviceId || tokenDeviceId;
+            const requestDeviceId = req.headers['x-device-id'] || req.query?.deviceId;
 
             // 1. Device Tracking: Upsert device details
             try {
-                const activeDeviceId = tokenDeviceId || requestDeviceId;
+                const activeDeviceId = requestDeviceId || tokenDeviceId;
                 if (activeDeviceId) {
                     const userAgent = req.headers['user-agent'] || '';
                     const ip = req.ip || req.connection.remoteAddress || '';

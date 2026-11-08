@@ -49,17 +49,20 @@ app.use(cors({
         if (!origin) return callback(null, true);
         
         const cleanOrigin = origin.replace(/\/+$/, '');
-        if (
+        
+        const isAllowed = 
             allowedOrigins.includes(cleanOrigin) ||
-            cleanOrigin.endsWith('.vercel.app') ||
-            cleanOrigin.endsWith('.asacademy.site') ||
-            cleanOrigin.includes('asacademy.site')
-        ) {
+            cleanOrigin === 'https://asacademy.site' ||
+            cleanOrigin === 'https://www.asacademy.site' ||
+            /^https:\/\/[a-zA-Z0-9-]+\.asacademy\.site$/.test(cleanOrigin) ||
+            /^https:\/\/as-academy[a-zA-Z0-9-]*\.vercel\.app$/.test(cleanOrigin);
+
+        if (isAllowed) {
             return callback(null, true);
         }
         
-        // In case of unknown origin in production, allow it if it matches configured URL or allow dynamically
-        return callback(null, true);
+        console.warn(`[CORS Blocked] Origin not allowed: ${origin}`);
+        return callback(new Error('CORS request blocked: origin not allowed'), false);
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],

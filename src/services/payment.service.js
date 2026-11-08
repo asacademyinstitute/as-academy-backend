@@ -2,6 +2,7 @@ import Razorpay from 'razorpay';
 import crypto from 'crypto';
 import supabase from '../config/database.js';
 import { AppError } from '../middlewares/error.middleware.js';
+import couponService from './coupon.service.js';
 
 class PaymentService {
     constructor() {
@@ -12,14 +13,15 @@ class PaymentService {
     }
 
     /**
-     * Create Razorpay order
-     * @param {number} amount - Amount in INR
+     * Create Razorpay order with strict server-side price validation
+     * @param {number} amount - Client-submitted amount (for validation)
      * @param {string} courseId - Course ID
      * @param {string} userId - User ID
+     * @param {string} couponCode - Optional coupon code
      */
-    async createOrder(amount, courseId, userId) {
+    async createOrder(amount, courseId, userId, couponCode = null) {
         try {
-            // Get course details
+            // Get course details from trusted database
             const { data: course, error: courseError } = await supabase
                 .from('courses')
                 .select('*')
@@ -31,33 +33,102 @@ class PaymentService {
             }
 
             // Check if already enrolled
-            const { data: existingEnrollment, error: existingError } = await supabase
+            const { data: existingEnrollment } = await supabase
                 .from('enrollments')
                 .select('id')
                 .eq('student_id', userId)
                 .eq('course_id', courseId)
                 .eq('status', 'active')
-                .maybeSingle(); // maybeSingle() returns null if not found (single() throws error)
+                .maybeSingle();
 
             if (existingEnrollment) {
                 throw new AppError('Already enrolled in this course', 400);
             }
 
-            // Create Razorpay order
-            // NOTE: receipt must be <= 40 chars (Razorpay limit)
-            // Use short IDs: first 8 chars of courseId + userId + timestamp mod
+            // SERVER-SIDE PRICE & COUPON CALCULATION (SECURITY: Never trust client-supplied amount)
+            const originalPrice = Number(course.price);
+            let finalPayable = originalPrice;
+            let validatedCoupon = null;
+            let discountAmount = 0;
+
+            if (couponCode && typeof couponCode === 'string' && couponCode.trim()) {
+                validatedCoupon = await couponService.validateCoupon(couponCode.trim(), courseId, userId);
+                discountAmount = couponService.calculateDiscount(validatedCoupon, originalPrice);
+                finalPayable = Math.max(0, originalPrice - discountAmount);
+            }
+
+            // Verify client amount against server-side calculation to prevent price tampering
+            if (amount !== undefined && amount !== null && Math.abs(Number(amount) - finalPayable) > 0.01) {
+                console.warn(`Price tampering detected: user ${userId} submitted ₹${amount}, expected ₹${finalPayable}`);
+                throw new AppError('Price mismatch detected. Order cannot be created.', 400);
+            }
+
+            // Handle 100% discount / free course directly without Razorpay
+            if (finalPayable === 0) {
+                const { data: freePayment, error: freePayError } = await supabase
+                    .from('payments')
+                    .insert({
+                        student_id: userId,
+                        course_id: courseId,
+                        amount: 0,
+                        currency: 'INR',
+                        status: 'success',
+                        payment_method: validatedCoupon ? 'coupon' : 'free',
+                    })
+                    .select()
+                    .single();
+
+                if (freePayError) {
+                    throw new AppError('Failed to record free enrollment payment', 500);
+                }
+
+                if (validatedCoupon) {
+                    await couponService.applyCoupon(validatedCoupon.id, userId, freePayment.id, discountAmount);
+                }
+
+                const validityDays = course?.validity_days || 365;
+                const validUntil = new Date();
+                validUntil.setDate(validUntil.getDate() + validityDays);
+
+                const { data: enrollment, error: enrollError } = await supabase
+                    .from('enrollments')
+                    .insert({
+                        student_id: userId,
+                        course_id: courseId,
+                        payment_type: 'online',
+                        status: 'active',
+                        valid_until: validUntil.toISOString(),
+                    })
+                    .select()
+                    .single();
+
+                if (enrollError) {
+                    throw new AppError('Failed to activate course enrollment', 500);
+                }
+
+                return {
+                    isFree: true,
+                    enrollment,
+                    message: 'Course enrolled successfully with 100% discount',
+                };
+            }
+
+            // Create Razorpay order with server-calculated price
             const shortCourse = courseId.replace(/-/g, '').substring(0, 8);
             const shortUser = userId.replace(/-/g, '').substring(0, 8);
             const shortTs = Date.now().toString().slice(-8);
-            const receipt = `c${shortCourse}u${shortUser}t${shortTs}`; // ~27 chars
+            const receipt = `c${shortCourse}u${shortUser}t${shortTs}`;
+
             const order = await this.razorpay.orders.create({
-                amount: amount * 100, // Convert to paise
+                amount: Math.round(finalPayable * 100), // Convert to paise
                 currency: 'INR',
                 receipt,
                 notes: {
                     courseId,
                     userId,
                     courseName: course.title,
+                    couponId: validatedCoupon ? validatedCoupon.id : '',
+                    discountAmount: discountAmount.toString(),
                 },
             });
 
@@ -67,7 +138,7 @@ class PaymentService {
                     student_id: userId,
                     course_id: courseId,
                     razorpay_order_id: order.id,
-                    amount: amount,
+                    amount: finalPayable,
                     currency: 'INR',
                     status: 'pending',
                     payment_method: 'online',
@@ -87,6 +158,7 @@ class PaymentService {
                 keyId: process.env.RAZORPAY_KEY_ID,
                 courseName: course.title,
                 paymentId: payment.id,
+                isFree: false,
             };
         } catch (error) {
             console.error('Create Order Error:', error);
@@ -179,6 +251,28 @@ class PaymentService {
         if (enrollError) {
             console.error('Enrollment insert failed in completePaymentAndEnroll:', enrollError);
             throw new AppError(`Failed to create enrollment: ${enrollError.message}`, 500);
+        }
+
+        // 5. Track coupon usage if a coupon was used for this order
+        if (paymentRecord.razorpay_order_id) {
+            try {
+                const rzpOrder = await this.razorpay.orders.fetch(paymentRecord.razorpay_order_id);
+                if (rzpOrder && rzpOrder.notes && rzpOrder.notes.couponId) {
+                    const couponId = rzpOrder.notes.couponId;
+                    const discountAmount = parseFloat(rzpOrder.notes.discountAmount) || 0;
+                    const { data: existingUsage } = await supabase
+                        .from('coupon_usage')
+                        .select('id')
+                        .eq('payment_id', paymentRecord.id)
+                        .maybeSingle();
+
+                    if (!existingUsage) {
+                        await couponService.applyCoupon(couponId, paymentRecord.student_id, paymentRecord.id, discountAmount);
+                    }
+                }
+            } catch (couponErr) {
+                console.error('Failed to apply coupon usage on payment completion:', couponErr);
+            }
         }
 
         console.log(`[PaymentService] Successfully auto-enrolled student ${paymentRecord.student_id} in course ${paymentRecord.course_id}`);
@@ -404,16 +498,24 @@ class PaymentService {
     async handleWebhook(event, signature) {
         try {
             const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
-            if (webhookSecret && signature) {
-                const expectedSignature = crypto
-                    .createHmac('sha256', webhookSecret)
-                    .update(typeof event === 'string' ? event : JSON.stringify(event))
-                    .digest('hex');
+            if (!webhookSecret) {
+                console.error('RAZORPAY_WEBHOOK_SECRET is not configured on server');
+                throw new AppError('Webhook secret not configured', 500);
+            }
 
-                if (expectedSignature !== signature) {
-                    console.error('Invalid webhook signature');
-                    throw new AppError('Invalid webhook signature', 400);
-                }
+            if (!signature) {
+                console.error('Missing Razorpay webhook signature header');
+                throw new AppError('Webhook signature header missing', 400);
+            }
+
+            const expectedSignature = crypto
+                .createHmac('sha256', webhookSecret)
+                .update(typeof event === 'string' ? event : JSON.stringify(event))
+                .digest('hex');
+
+            if (expectedSignature !== signature) {
+                console.error('Invalid webhook signature');
+                throw new AppError('Invalid webhook signature', 400);
             }
 
             // Handle different event types

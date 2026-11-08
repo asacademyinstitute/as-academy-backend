@@ -41,12 +41,13 @@ class StreamingService {
                 }
             }
 
-            // Generate secure, signed URL using Backblaze B2 (expires in 2 hours)
-            const streamUrl = await this.getSignedUrl(lecture.file_url, 7200);
+            // Generate secure, signed URL using Backblaze B2 (expires in 5 minutes to prevent URL sharing)
+            const validitySeconds = 300;
+            const streamUrl = await this.getSignedUrl(lecture.file_url, validitySeconds);
 
             return {
                 url: streamUrl,
-                expiresAt: new Date(Date.now() + (2 * 60 * 60 * 1000)).toISOString(),
+                expiresAt: new Date(Date.now() + (validitySeconds * 1000)).toISOString(),
             };
         } catch (error) {
             throw error;
@@ -89,12 +90,13 @@ class StreamingService {
                 }
             }
 
-            // Generate secure, signed URL using Backblaze B2 (expires in 2 hours)
-            const streamUrl = await this.getSignedUrl(lecture.file_url, 7200);
+            // Generate secure, signed URL using Backblaze B2 (expires in 5 minutes to prevent URL sharing)
+            const validitySeconds = 300;
+            const streamUrl = await this.getSignedUrl(lecture.file_url, validitySeconds);
 
             return {
                 url: streamUrl,
-                expiresAt: new Date(Date.now() + (2 * 60 * 60 * 1000)).toISOString(),
+                expiresAt: new Date(Date.now() + (validitySeconds * 1000)).toISOString(),
             };
         } catch (error) {
             throw error;

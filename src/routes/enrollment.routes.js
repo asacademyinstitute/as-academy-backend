@@ -1,13 +1,17 @@
 import { Router } from 'express';
 import enrollmentService from '../services/enrollment.service.js';
-import { asyncHandler } from '../middlewares/error.middleware.js';
+import { asyncHandler, AppError } from '../middlewares/error.middleware.js';
 import { authenticate } from '../middlewares/auth.middleware.js';
 import { isAdmin, isTeacherOrAdmin, isStudent } from '../middlewares/rbac.middleware.js';
 
 const router = Router();
 
-// Get student enrollments
+// Get student enrollments (Self or Admin only)
 router.get('/student/:studentId', authenticate, asyncHandler(async (req, res) => {
+    if (req.user.role !== 'admin' && req.user.id !== req.params.studentId) {
+        throw new AppError('Unauthorized: You can only view your own enrollments', 403);
+    }
+
     const enrollments = await enrollmentService.getStudentEnrollments(req.params.studentId);
 
     res.json({
