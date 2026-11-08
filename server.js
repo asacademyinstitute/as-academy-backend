@@ -40,10 +40,12 @@ const allowedOrigins = [
     'https://www.asacademy.site',
     'http://localhost:3000',
     'http://localhost:3001',
+    'http://127.0.0.1:3000',
+    'http://127.0.0.1:3001',
     ...(config.frontendUrl ? config.frontendUrl.split(',').map(u => u.trim().replace(/\/+$/, '')) : [])
 ];
 
-app.use(cors({
+const corsOptions = {
     origin: (origin, callback) => {
         // Allow requests with no origin (like mobile apps, curl, server-to-server)
         if (!origin) return callback(null, true);
@@ -55,22 +57,25 @@ app.use(cors({
             cleanOrigin === 'https://asacademy.site' ||
             cleanOrigin === 'https://www.asacademy.site' ||
             /^https:\/\/[a-zA-Z0-9-]+\.asacademy\.site$/.test(cleanOrigin) ||
-            /^https:\/\/as-academy[a-zA-Z0-9-]*\.vercel\.app$/.test(cleanOrigin);
+            /^https:\/\/[a-zA-Z0-9-]+\.vercel\.app$/.test(cleanOrigin) ||
+            /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(cleanOrigin);
 
         if (isAllowed) {
             return callback(null, true);
         }
         
         console.warn(`[CORS Blocked] Origin not allowed: ${origin}`);
-        return callback(new Error('CORS request blocked: origin not allowed'), false);
+        return callback(null, false);
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Device-ID', 'Accept', 'Origin', 'X-Requested-With']
-}));
+};
+
+app.use(cors(corsOptions));
 
 // Enable pre-flight for all routes
-app.options('*', cors());
+app.options('*', cors(corsOptions));
 
 // Trust proxy - required for Render deployment
 app.set('trust proxy', 1);
