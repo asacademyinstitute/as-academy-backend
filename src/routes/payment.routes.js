@@ -11,7 +11,8 @@ const router = express.Router();
  */
 router.post('/create-order', authenticate, async (req, res, next) => {
     try {
-        const { courseId, amount, couponCode } = req.body;
+        const { courseId, amount } = req.body;
+        const couponCode = req.body.couponCode || req.body.coupon || req.body.code || req.body.coupon_code || req.body.appliedCoupon?.code || null;
         const userId = req.user.id;
 
         const order = await paymentService.createOrder(amount, courseId, userId, couponCode);

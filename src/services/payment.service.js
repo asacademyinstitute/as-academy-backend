@@ -58,9 +58,9 @@ class PaymentService {
             }
 
             // Verify client amount against server-side calculation to prevent price tampering
-            if (amount !== undefined && amount !== null && Math.abs(Number(amount) - finalPayable) > 0.01) {
-                console.warn(`Price tampering detected: user ${userId} submitted ₹${amount}, expected ₹${finalPayable}`);
-                throw new AppError('Price mismatch detected. Order cannot be created.', 400);
+            if (amount !== undefined && amount !== null && Math.abs(Number(amount) - finalPayable) > 1.0) {
+                console.warn(`Price tampering detected: user ${userId} submitted ₹${amount}, expected ₹${finalPayable} (Original: ₹${originalPrice}, Coupon: ${couponCode || 'None'})`);
+                throw new AppError(`Price mismatch detected. Expected ₹${finalPayable}, received ₹${amount}. Please re-apply coupon and try again.`, 400);
             }
 
             // Handle 100% discount / free course directly without Razorpay
