@@ -5,7 +5,8 @@ import crypto from 'crypto';
 import backblazeService from './backblaze.service.js';
 
 class StreamingService {
-    // Generate signed URL for HLS video streaming
+    // Generate proxy stream URL for video (routes through backend, NOT direct B2)
+    // This prevents Backblaze B2 bandwidth cap issues
     async generateVideoStreamUrl(lectureId, userId, role = 'student') {
         try {
             // Get lecture details
@@ -41,20 +42,23 @@ class StreamingService {
                 }
             }
 
-            // Generate secure, signed URL using Backblaze B2 (expires in 5 minutes to prevent URL sharing)
-            const validitySeconds = 300;
-            const streamUrl = await this.getSignedUrl(lecture.file_url, validitySeconds);
+            // Return backend PROXY URL instead of direct B2 signed URL.
+            // This routes all bandwidth through the backend server (Render),
+            // preventing B2 daily download cap from being hit.
+            const backendUrl = (process.env.BACKEND_URL || 'https://as-academy-backend.onrender.com').replace(/\/+$/, '');
+            const proxyUrl = `${backendUrl}/api/streaming/stream/video/${lectureId}`;
 
             return {
-                url: streamUrl,
-                expiresAt: new Date(Date.now() + (validitySeconds * 1000)).toISOString(),
+                url: proxyUrl,
+                expiresAt: null, // proxy URLs don't expire (auth is enforced per-request)
             };
         } catch (error) {
             throw error;
         }
     }
 
-    // Generate signed URL for PDF viewing
+    // Generate proxy stream URL for PDF (routes through backend, NOT direct B2)
+    // This prevents Backblaze B2 bandwidth cap issues
     async generatePDFStreamUrl(lectureId, userId, role = 'student') {
         try {
             // Get lecture details
@@ -90,13 +94,15 @@ class StreamingService {
                 }
             }
 
-            // Generate secure, signed URL using Backblaze B2 (expires in 5 minutes to prevent URL sharing)
-            const validitySeconds = 300;
-            const streamUrl = await this.getSignedUrl(lecture.file_url, validitySeconds);
+            // Return backend PROXY URL instead of direct B2 signed URL.
+            // This routes all bandwidth through the backend server (Render),
+            // preventing B2 daily download cap from being hit.
+            const backendUrl = (process.env.BACKEND_URL || 'https://as-academy-backend.onrender.com').replace(/\/+$/, '');
+            const proxyUrl = `${backendUrl}/api/streaming/stream/pdf/${lectureId}`;
 
             return {
-                url: streamUrl,
-                expiresAt: new Date(Date.now() + (validitySeconds * 1000)).toISOString(),
+                url: proxyUrl,
+                expiresAt: null, // proxy URLs don't expire (auth is enforced per-request)
             };
         } catch (error) {
             throw error;
