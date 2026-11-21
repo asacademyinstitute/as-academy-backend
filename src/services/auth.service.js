@@ -11,16 +11,17 @@ class AuthService {
     async register(userData) {
         // SECURITY: role is never accepted from client input — always 'student' on self-registration
         const { name, email, phone, password, enrollment_number, college_name, semester, deviceId } = userData;
+        const cleanEmail = (email || '').trim().toLowerCase();
 
-        // Check if user already exists
+        // Check if user already exists (case-insensitive)
         const { data: existingUser } = await supabase
             .from('users')
             .select('id')
-            .eq('email', email)
-            .single();
+            .ilike('email', cleanEmail)
+            .maybeSingle();
 
         if (existingUser) {
-            throw new AppError('User with this email already exists', 400);
+            throw new AppError('An account with this email already exists. Please log in.', 400);
         }
 
         // Hash password
@@ -30,9 +31,9 @@ class AuthService {
         const { data: user, error } = await supabase
             .from('users')
             .insert({
-                name,
-                email,
-                phone,
+                name: (name || '').trim(),
+                email: cleanEmail,
+                phone: (phone || '').trim(),
                 password_hash,
                 enrollment_number,
                 college_name,
@@ -60,15 +61,17 @@ class AuthService {
 
     // Login user
     async login(email, password, deviceId) {
-        // Get user
+        const cleanEmail = (email || '').trim().toLowerCase();
+
+        // Get user (case-insensitive email matching)
         const { data: user, error } = await supabase
             .from('users')
             .select('*')
-            .eq('email', email)
-            .single();
+            .ilike('email', cleanEmail)
+            .maybeSingle();
 
         if (error || !user) {
-            throw new AppError('Invalid email or password.', 401);
+            throw new AppError('No account found with this email. Please check your email or sign up.', 401);
         }
 
         // Check if user is blocked
@@ -79,7 +82,7 @@ class AuthService {
         // Verify password
         const isPasswordValid = await bcrypt.compare(password, user.password_hash);
         if (!isPasswordValid) {
-            throw new AppError('Invalid email or password.', 401);
+            throw new AppError('Incorrect password. Please check your password and try again.', 401);
         }
 
         // For students, check device limit
