@@ -441,13 +441,13 @@ class PaymentService {
         try {
             if (!studentId) return [];
 
-            // Look back up to 48 hours for pending online orders
+            // Look back up to 48 hours for any incomplete/pending online orders
             const sinceDate = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
             let query = supabase
                 .from('payments')
                 .select('*')
                 .eq('student_id', studentId)
-                .eq('status', 'pending')
+                .neq('status', 'success')
                 .not('razorpay_order_id', 'is', null)
                 .gte('created_at', sinceDate)
                 .order('created_at', { ascending: false });
