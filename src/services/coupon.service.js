@@ -198,7 +198,7 @@ class CouponService {
             .select('id')
             .eq('coupon_id', coupon.id)
             .eq('user_id', userId)
-            .single();
+            .maybeSingle();
 
         if (previousUsage) {
             throw new AppError('You have already used this coupon', 400);

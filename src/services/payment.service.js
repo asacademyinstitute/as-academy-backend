@@ -53,15 +53,32 @@ class PaymentService {
             let discountAmount = 0;
 
             if (couponCode && typeof couponCode === 'string' && couponCode.trim()) {
-                validatedCoupon = await couponService.validateCoupon(couponCode.trim(), courseId, userId);
-                discountAmount = couponService.calculateDiscount(validatedCoupon, originalPrice);
-                finalPayable = Math.max(0, originalPrice - discountAmount);
+                try {
+                    validatedCoupon = await couponService.validateCoupon(couponCode.trim(), courseId, userId);
+                    discountAmount = couponService.calculateDiscount(validatedCoupon, originalPrice);
+                    finalPayable = Math.max(0, originalPrice - discountAmount);
+                } catch (couponErr) {
+                    console.warn(`Coupon validation warning in createOrder: ${couponErr.message}`);
+                    throw couponErr;
+                }
             }
 
-            // Verify client amount against server-side calculation to prevent price tampering
-            if (amount !== undefined && amount !== null && Math.abs(Number(amount) - finalPayable) > 1.0) {
-                console.warn(`Price tampering detected: user ${userId} submitted ₹${amount}, expected ₹${finalPayable} (Original: ₹${originalPrice}, Coupon: ${couponCode || 'None'})`);
-                throw new AppError(`Price mismatch detected. Expected ₹${finalPayable}, received ₹${amount}. Please re-apply coupon and try again.`, 400);
+            // Verify client amount against server-side calculation to prevent price tampering.
+            // When a coupon is used, the server calculates finalPayable authoritatively from DB.
+            // Client amount may equal finalPayable (after coupon) OR originalPrice (before coupon).
+            // Both are acceptable when couponCode is present.
+            if (amount !== undefined && amount !== null && !isNaN(Number(amount))) {
+                const numAmount = Number(amount);
+                const matchesFinal = Math.abs(numAmount - finalPayable) <= 2.0;
+                const matchesOriginal = Math.abs(numAmount - originalPrice) <= 2.0;
+
+                // Accept if matches final discounted price, OR matches original price when coupon is used
+                const isAcceptable = matchesFinal || (couponCode && matchesOriginal);
+
+                if (!isAcceptable) {
+                    console.warn(`Price tampering detected: user ${userId} submitted ₹${amount}, expected ₹${finalPayable} (Original: ₹${originalPrice}, Coupon: ${couponCode || 'None'})`);
+                    throw new AppError(`Price mismatch detected. Expected ₹${finalPayable}, received ₹${amount}. Please refresh and try again.`, 400);
+                }
             }
 
             // Handle 100% discount / free course directly without Razorpay
