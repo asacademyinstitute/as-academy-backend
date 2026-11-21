@@ -6,6 +6,30 @@ import { isAdmin } from '../middlewares/rbac.middleware.js';
 const router = express.Router();
 
 /**
+ * Payment gateway health check (admin only)
+ * GET /api/payments/ping
+ * Tests Razorpay connectivity from the production server
+ */
+router.get('/ping', authenticate, isAdmin, async (req, res) => {
+    const checks = {
+        razorpay_key_id: !!process.env.RAZORPAY_KEY_ID,
+        razorpay_key_secret: !!process.env.RAZORPAY_KEY_SECRET,
+        key_mode: process.env.RAZORPAY_KEY_ID?.startsWith('rzp_live') ? 'LIVE ✅' : 'TEST ⚠️',
+        supabase_url: !!process.env.SUPABASE_URL,
+        supabase_service_key: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
+    };
+    // Try a lightweight Razorpay API call
+    try {
+        await paymentService.razorpay.orders.all({ count: 1 });
+        checks.razorpay_api_reachable = true;
+    } catch (e) {
+        checks.razorpay_api_reachable = false;
+        checks.razorpay_api_error = e?.error?.description || e?.message || String(e);
+    }
+    res.json({ success: true, data: checks });
+});
+
+/**
  * Create Razorpay order
  * POST /api/payments/create-order
  */

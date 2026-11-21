@@ -22,6 +22,14 @@ class PaymentService {
      */
     async createOrder(amount, courseId, userId, couponCode = null) {
         try {
+            console.log(`[createOrder] START userId=${userId} courseId=${courseId} amount=${amount} couponCode=${couponCode}`);
+
+            // Validate Razorpay keys are set
+            if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET) {
+                console.error('[createOrder] CRITICAL: Razorpay keys not configured in environment!');
+                throw new AppError('Payment gateway not configured. Please contact support.', 500);
+            }
+
             // Get course details from trusted database
             const { data: course, error: courseError } = await supabase
                 .from('courses')
@@ -30,8 +38,11 @@ class PaymentService {
                 .single();
 
             if (courseError || !course) {
+                console.error('[createOrder] Course not found:', courseError);
                 throw new AppError('Course not found', 404);
             }
+
+            console.log(`[createOrder] Course: ${course.title} price=₹${course.price}`);
 
             // Check if already enrolled
             const { data: existingEnrollment } = await supabase
@@ -48,6 +59,11 @@ class PaymentService {
 
             // SERVER-SIDE PRICE & COUPON CALCULATION (SECURITY: Never trust client-supplied amount)
             const originalPrice = Number(course.price);
+            if (isNaN(originalPrice) || originalPrice < 0) {
+                console.error(`[createOrder] Invalid course price: ${course.price}`);
+                throw new AppError('Invalid course price. Please contact support.', 500);
+            }
+
             let finalPayable = originalPrice;
             let validatedCoupon = null;
             let discountAmount = 0;
@@ -57,6 +73,7 @@ class PaymentService {
                     validatedCoupon = await couponService.validateCoupon(couponCode.trim(), courseId, userId);
                     discountAmount = couponService.calculateDiscount(validatedCoupon, originalPrice);
                     finalPayable = Math.max(0, originalPrice - discountAmount);
+                    console.log(`[createOrder] Coupon applied: discount=₹${discountAmount} finalPayable=₹${finalPayable}`);
                 } catch (couponErr) {
                     console.warn(`Coupon validation warning in createOrder: ${couponErr.message}`);
                     throw couponErr;
@@ -137,18 +154,36 @@ class PaymentService {
             const shortTs = Date.now().toString().slice(-8);
             const receipt = `c${shortCourse}u${shortUser}t${shortTs}`;
 
-            const order = await this.razorpay.orders.create({
-                amount: Math.round(finalPayable * 100), // Convert to paise
-                currency: 'INR',
-                receipt,
-                notes: {
-                    courseId,
-                    userId,
-                    courseName: course.title,
-                    couponId: validatedCoupon ? validatedCoupon.id : '',
-                    discountAmount: discountAmount.toString(),
-                },
-            });
+            const amountInPaise = Math.round(finalPayable * 100);
+            console.log(`[createOrder] Creating Razorpay order: ₹${finalPayable} = ${amountInPaise} paise, receipt=${receipt}`);
+
+            // Razorpay minimum order amount is ₹1 (100 paise)
+            if (amountInPaise < 100) {
+                console.error(`[createOrder] Amount too low: ${amountInPaise} paise (min 100 paise = ₹1)`);
+                throw new AppError('Course price is too low for online payment. Please contact support.', 400);
+            }
+
+            let order;
+            try {
+                order = await this.razorpay.orders.create({
+                    amount: amountInPaise,
+                    currency: 'INR',
+                    receipt,
+                    notes: {
+                        courseId,
+                        userId,
+                        courseName: course.title,
+                        couponId: validatedCoupon ? validatedCoupon.id : '',
+                        discountAmount: discountAmount.toString(),
+                    },
+                });
+                console.log(`[createOrder] Razorpay order created: ${order.id}`);
+            } catch (rzpError) {
+                // Razorpay returns error objects - extract meaningful message
+                const rzpMsg = rzpError?.error?.description || rzpError?.message || JSON.stringify(rzpError);
+                console.error(`[createOrder] Razorpay API error: ${rzpMsg}`, rzpError);
+                throw new AppError(`Payment gateway error: ${rzpMsg}`, 502);
+            }
 
             const { data: payment, error: paymentError } = await supabase
                 .from('payments')
@@ -165,10 +200,11 @@ class PaymentService {
                 .single();
 
             if (paymentError) {
-                console.error('Payment insert error details:', JSON.stringify(paymentError));
+                console.error('[createOrder] Payment insert error:', JSON.stringify(paymentError));
                 throw new AppError(`Failed to save payment record: ${paymentError.message}`, 500);
             }
 
+            console.log(`[createOrder] SUCCESS orderId=${order.id} amount=₹${finalPayable}`);
             return {
                 orderId: order.id,
                 amount: order.amount,
@@ -179,8 +215,9 @@ class PaymentService {
                 isFree: false,
             };
         } catch (error) {
-            console.error('Create Order Error:', error);
-            throw error instanceof AppError ? error : new AppError('Failed to create order', 500);
+            const errMsg = error?.message || error?.error?.description || JSON.stringify(error);
+            console.error(`[createOrder] FAILED: ${errMsg}`, { userId, courseId, couponCode });
+            throw error instanceof AppError ? error : new AppError(`Failed to create order: ${errMsg}`, 500);
         }
     }
 
