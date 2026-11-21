@@ -9,7 +9,7 @@ export const config = {
     // JWT
     jwtSecret: process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-in-production',
     jwtRefreshSecret: process.env.JWT_REFRESH_SECRET || 'your-super-secret-refresh-key-change-in-production',
-    jwtExpiresIn: '15m', // Access token expires in 15 minutes
+    jwtExpiresIn: '2h', // Access token expires in 2 hours (was 15m — too short for students reading course pages before buying)
     jwtRefreshExpiresIn: '7d', // Refresh token expires in 7 days
 
     // Supabase
