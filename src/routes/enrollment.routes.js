@@ -30,6 +30,19 @@ router.get('/course/:courseId', authenticate, isTeacherOrAdmin, asyncHandler(asy
     });
 }));
 
+// Get purchase counts for all courses in one shot (admin only)
+// Returns: { courseId: count, ... }
+router.get('/counts/all', authenticate, isAdmin, asyncHandler(async (req, res) => {
+    const counts = await enrollmentService.getAllCoursePurchaseCounts();
+    res.json({ success: true, data: counts });
+}));
+
+// Get ALL enrollments across ALL courses for global Excel export (admin only)
+router.get('/export/all', authenticate, isAdmin, asyncHandler(async (req, res) => {
+    const rows = await enrollmentService.getAllEnrollmentsForExport();
+    res.json({ success: true, data: rows });
+}));
+
 // Check access
 router.get('/check/:courseId', authenticate, isStudent, asyncHandler(async (req, res) => {
     const access = await enrollmentService.checkAccess(req.user.id, req.params.courseId);

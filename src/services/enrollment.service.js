@@ -220,6 +220,59 @@ class EnrollmentService {
         return enrollments;
     }
 
+    // Get purchase count for every course in one Supabase query (admin only)
+    async getAllCoursePurchaseCounts() {
+        const { data, error } = await supabase
+            .from('enrollments')
+            .select('course_id')
+            .eq('status', 'active');
+
+        if (error) {
+            throw new AppError('Failed to fetch course purchase counts', 500);
+        }
+
+        // Aggregate client-side: { courseId: count }
+        const counts = {};
+        (data || []).forEach(row => {
+            counts[row.course_id] = (counts[row.course_id] || 0) + 1;
+        });
+        return counts;
+    }
+
+    // Get ALL enrollments across ALL courses for global Excel export (admin only)
+    async getAllEnrollmentsForExport() {
+        const { data, error } = await supabase
+            .from('enrollments')
+            .select(`
+                id,
+                status,
+                enrolled_at,
+                valid_until,
+                payment_type,
+                courses:course_id ( title, category, semester, price ),
+                users:student_id ( name, email, phone )
+            `)
+            .eq('status', 'active')
+            .order('enrolled_at', { ascending: false });
+
+        if (error) {
+            throw new AppError('Failed to fetch enrollments for export', 500);
+        }
+
+        return (data || []).map(row => ({
+            course_title: row.courses?.title || '',
+            course_category: row.courses?.category || '',
+            course_semester: row.courses?.semester || '',
+            course_price: row.courses?.price || '',
+            student_name: row.users?.name || '',
+            student_email: row.users?.email || '',
+            student_phone: row.users?.phone || '',
+            purchase_date: row.enrolled_at ? new Date(row.enrolled_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }) : '',
+            valid_until: row.valid_until ? new Date(row.valid_until).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' }) : '',
+            payment_type: row.payment_type || '',
+        }));
+    }
+
     // Check if student has access to course
     async checkAccess(studentId, courseId) {
         let { data: enrollment, error } = await supabase
