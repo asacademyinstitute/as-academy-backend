@@ -1,9 +1,30 @@
-import express from 'express';
+﻿import express from 'express';
 import paymentService from '../services/payment.service.js';
 import { authenticate } from '../middlewares/auth.middleware.js';
 import { isAdmin } from '../middlewares/rbac.middleware.js';
 
 const router = express.Router();
+/**
+ * Public payment gateway status (no auth required)
+ * GET /api/payments/status
+ */
+router.get('/status', async (req, res) => {
+    const keyId = process.env.RAZORPAY_KEY_ID || '';
+    const status = {
+        razorpay_configured: !!(keyId && process.env.RAZORPAY_KEY_SECRET),
+        razorpay_mode: keyId.startsWith('rzp_live') ? 'LIVE' : keyId.startsWith('rzp_test') ? 'TEST' : 'NOT_SET',
+        key_prefix: keyId ? keyId.substring(0, 12) + '...' : 'NOT_SET',
+        server_time: new Date().toISOString(),
+    };
+    try {
+        await paymentService.razorpay.orders.all({ count: 1 });
+        status.razorpay_api_ok = true;
+    } catch (e) {
+        status.razorpay_api_ok = false;
+        status.razorpay_api_error = e?.error?.description || e?.message || 'Unknown error';
+    }
+    res.json({ success: true, data: status });
+});
 
 /**
  * Payment gateway health check (admin only)
@@ -14,7 +35,7 @@ router.get('/ping', authenticate, isAdmin, async (req, res) => {
     const checks = {
         razorpay_key_id: !!process.env.RAZORPAY_KEY_ID,
         razorpay_key_secret: !!process.env.RAZORPAY_KEY_SECRET,
-        key_mode: process.env.RAZORPAY_KEY_ID?.startsWith('rzp_live') ? 'LIVE ✅' : 'TEST ⚠️',
+        key_mode: process.env.RAZORPAY_KEY_ID?.startsWith('rzp_live') ? 'LIVE âœ…' : 'TEST âš ï¸',
         supabase_url: !!process.env.SUPABASE_URL,
         supabase_service_key: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
     };
@@ -231,3 +252,4 @@ router.get('/filtered', authenticate, isAdmin, async (req, res, next) => {
 });
 
 export default router;
+
