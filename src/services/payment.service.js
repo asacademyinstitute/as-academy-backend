@@ -163,6 +163,12 @@ class PaymentService {
                 throw new AppError('Course price is too low for online payment. Please contact support.', 400);
             }
 
+            const safeCourseTitle = (course.title || '')
+                .replace(/[^\x20-\x7E]/g, ' ')
+                .replace(/\s+/g, ' ')
+                .trim()
+                .substring(0, 100) || 'Course';
+
             let order;
             try {
                 order = await this.razorpay.orders.create({
@@ -172,7 +178,7 @@ class PaymentService {
                     notes: {
                         courseId,
                         userId,
-                        courseName: course.title,
+                        courseName: safeCourseTitle,
                         couponId: validatedCoupon ? validatedCoupon.id : '',
                         discountAmount: discountAmount.toString(),
                     },

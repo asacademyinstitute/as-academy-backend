@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
+import https from 'https';
 import { config } from './src/config/config.js';
 import { errorHandler } from './src/middlewares/error.middleware.js';
 
@@ -145,6 +146,20 @@ app.listen(PORT, () => {
     console.log(`🚀 AS Academy LMS Backend running on port ${PORT}`);
     console.log(`📝 Environment: ${config.nodeEnv}`);
     console.log(`🔗 Health check: http://localhost:${PORT}/health`);
+
+    // Self-keepalive: prevent Render free tier from sleeping after 15m idle
+    if (config.nodeEnv === 'production') {
+        const PING_INTERVAL = 13 * 60 * 1000; // 13 minutes
+        const BACKEND_URL = process.env.BACKEND_URL || 'https://as-academy-backend.onrender.com';
+        setInterval(() => {
+            https.get(`${BACKEND_URL}/health`, (res) => {
+                console.log(`[KeepAlive] Self-ping status: ${res.statusCode} at ${new Date().toISOString()}`);
+            }).on('error', (err) => {
+                console.warn('[KeepAlive] Self-ping error:', err.message);
+            });
+        }, PING_INTERVAL);
+        console.log(`⏱️ KeepAlive scheduler initialized (every 13m to ${BACKEND_URL})`);
+    }
 });
 
 export default app;
